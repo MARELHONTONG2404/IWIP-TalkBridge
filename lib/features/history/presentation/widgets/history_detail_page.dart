@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../../../domain/entities/history_item.dart';
+import '../../domain/entities/history_item.dart';
 
 class HistoryDetailPage extends StatelessWidget {
   final HistoryItem item;
