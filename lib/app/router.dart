@@ -5,6 +5,9 @@ import '../features/welcome/presentation/welcome_page.dart';
 import '../features/home/presentation/home_page.dart';
 import '../features/conversation/presentation/pages/conversation_page.dart';
 import '../features/history/presentation/pages/history_page.dart';
+import '../features/settings/presentation/settings_page.dart';
+import '../features/offline/presentation/offline_page.dart';
+import '../features/favorite/presentation/pages/favorite_page.dart';
 import '../shared/widgets/placeholder_page.dart';
 
 final GoRouter appRouter = GoRouter(
@@ -33,15 +36,15 @@ final GoRouter appRouter = GoRouter(
     ),
     GoRoute(
       path: '/favorite',
-      builder: (context, state) => const PlaceholderPage(title: 'Favorite'),
+      builder: (context, state) => const FavoritePage(),
     ),
     GoRoute(
       path: '/offline',
-      builder: (context, state) => const PlaceholderPage(title: 'Offline'),
+      builder: (context, state) => const OfflinePage(),
     ),
     GoRoute(
       path: '/settings',
-      builder: (context, state) => const PlaceholderPage(title: 'Settings'),
+      builder: (context, state) => const SettingsPage(),
     ),
   ],
 );
