@@ -4,6 +4,7 @@ import '../features/splash/presentation/splash_page.dart';
 import '../features/welcome/presentation/welcome_page.dart';
 import '../features/home/presentation/home_page.dart';
 import '../features/conversation/presentation/pages/conversation_page.dart';
+import '../features/history/presentation/pages/history_page.dart';
 import '../shared/widgets/placeholder_page.dart';
 
 final GoRouter appRouter = GoRouter(
@@ -28,7 +29,7 @@ final GoRouter appRouter = GoRouter(
     ),
     GoRoute(
       path: '/history',
-      builder: (context, state) => const PlaceholderPage(title: 'History'),
+      builder: (context, state) => const HistoryPage(),
     ),
     GoRoute(
       path: '/favorite',
