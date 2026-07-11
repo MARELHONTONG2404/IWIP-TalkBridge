@@ -9,6 +9,7 @@ import '../../../../core/services/speech_service.dart';
 import '../../../../core/services/speech_text_processor.dart';
 import '../../../../core/services/tts_service.dart';
 import '../../providers/conversation_provider.dart';
+import '../../../settings/providers/settings_provider.dart';
 
 import '../widgets/conversation_panel.dart';
 import '../widgets/language_selector.dart';
@@ -241,31 +242,36 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(conversationProvider);
+    final settings = ref.watch(settingsProvider);
     final micActive = _soundLevel > 1;
-    final primary = Theme.of(context).colorScheme.primary;
+    final theme = Theme.of(context);
+    final primary = theme.colorScheme.primary;
+
+    final lang = settings.appLanguage;
+    final title = lang == 'Indonesia' ? 'Terjemahan Langsung' : (lang == '中文' ? '实时翻译' : 'Live Translation');
 
     final statusText = state.isListening
         ? micActive
-            ? 'Mic aktif — terus bicara dengan jelas'
-            : 'Listening... dekatkan HP dan bicara'
+            ? (lang == 'Indonesia' ? 'Mic aktif' : (lang == '中文' ? '麦克风开启' : 'Mic active'))
+            : (lang == 'Indonesia' ? 'Mendengarkan...' : (lang == '中文' ? '正在听...' : 'Listening...'))
         : _initializing
-            ? 'Menyiapkan mikrofon...'
+            ? (lang == 'Indonesia' ? 'Menyiapkan...' : (lang == '中文' ? '准备中...' : 'Initializing...'))
             : _speechReady
-                ? 'Tap mic to start translating'
-                : 'Mic belum siap — tap mic untuk coba lagi';
+                ? (lang == 'Indonesia' ? 'Tap mic untuk mulai' : (lang == '中文' ? '点击麦克风开始' : 'Tap mic to start'))
+                : (lang == 'Indonesia' ? 'Mic tidak siap' : (lang == '中文' ? '麦克风未就绪' : 'Mic not ready'));
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF3F4F8),
+      backgroundColor: theme.scaffoldBackgroundColor,
       appBar: AppBar(
         elevation: 0,
-        backgroundColor: const Color(0xFFF3F4F8),
+        backgroundColor: theme.scaffoldBackgroundColor,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new, color: Colors.black87, size: 20),
+          icon: Icon(Icons.arrow_back_ios_new, color: theme.iconTheme.color, size: 20),
           onPressed: () => Navigator.pop(context),
         ),
-        title: const Text(
-          'Live Translation',
-          style: TextStyle(fontWeight: FontWeight.w700, color: Colors.black87),
+        title: Text(
+          title,
+          style: TextStyle(fontWeight: FontWeight.w700, color: theme.textTheme.titleLarge?.color),
         ),
         centerTitle: true,
       ),
@@ -297,7 +303,7 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
                   'Speech engine: $_activeLocale',
                   style: TextStyle(
                     fontSize: 12,
-                    color: Colors.grey.shade600,
+                    color: theme.textTheme.bodySmall?.color,
                   ),
                 ),
               ],
@@ -326,10 +332,16 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
                         isPlaceholder: _isPlaceholder(state.translatedText),
                         onSpeak: () {
                           print('DEBUG: TTS started for: "${state.translatedText}"');
+                          final settings = ref.read(settingsProvider);
+
+                          // Use settings
+                          final rate = settings.speechSpeed == 'Slow' ? 0.3 : (settings.speechSpeed == 'Fast' ? 0.8 : 0.5);
+
                           _ttsService.speak(
                             state.translatedText,
                             languageCode: state.targetLanguage.code,
                           );
+                          print('DEBUG: TTS rate set to: $rate');
                         },
                       ),
                     ],

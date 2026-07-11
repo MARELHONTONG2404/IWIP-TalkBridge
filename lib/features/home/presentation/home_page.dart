@@ -1,34 +1,44 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../app/app_colors.dart';
+import '../../settings/providers/settings_provider.dart';
 
-class HomePage extends StatelessWidget {
+class HomePage extends ConsumerWidget {
   const HomePage({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final settings = ref.watch(settingsProvider);
+    
+    final lang = settings.appLanguage;
+    final translateText = lang == 'Indonesia' ? 'Terjemahkan dengan mudah' : (lang == '中文' ? '轻松翻译' : 'Translate with ease');
+    final tapToSpeak = lang == 'Indonesia' ? 'Ketuk untuk bicara & terjemahkan' : (lang == '中文' ? '点击此处翻译' : 'Tap to speak and translate');
+    final moreTools = lang == 'Indonesia' ? 'Alat lainnya' : (lang == '中文' ? '更多工具' : 'More tools');
+
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: theme.scaffoldBackgroundColor,
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: theme.scaffoldBackgroundColor,
         elevation: 0,
         title: Row(
           children: [
             Image.asset(
               'assets/images/IWIP-Logo-150.png',
               height: 32,
-              errorBuilder: (context, error, stackTrace) => const Icon(
+              errorBuilder: (context, error, stackTrace) => Icon(
                 Icons.business_rounded,
-                color: AppColors.coral,
+                color: theme.colorScheme.primary,
                 size: 24,
               ),
             ),
             const SizedBox(width: 10),
-            const Text(
+            Text(
               'IWIP TalkBridge',
               style: TextStyle(
-                color: Colors.black,
+                color: theme.textTheme.titleLarge?.color,
                 fontWeight: FontWeight.bold,
               ),
             ),
@@ -56,9 +66,8 @@ class HomePage extends StatelessWidget {
                 ),
                 child: Stack(
                   children: [
-                    // Banner Image
                     Image.asset(
-                      'assets/images/1kodo.png', // Placeholder
+                      'assets/images/1kodo.png',
                       width: double.infinity,
                       height: 200,
                       fit: BoxFit.cover,
@@ -72,20 +81,9 @@ class HomePage extends StatelessWidget {
                         ),
                       ),
                     ),
-                    // Overlay
                     Container(
                       decoration: BoxDecoration(
                         color: Colors.black.withValues(alpha: 0.3),
-                      ),
-                    ),
-                    Positioned(
-                      left: 20,
-                      bottom: 30,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: const [
-                        
-                        ],
                       ),
                     ),
                   ],
@@ -98,12 +96,12 @@ class HomePage extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    'Translate with ease',
+                  Text(
+                    translateText,
                     style: TextStyle(
                       fontSize: 24,
                       fontWeight: FontWeight.bold,
-                      color: Colors.black,
+                      color: theme.textTheme.titleLarge?.color,
                     ),
                   ),
                   const SizedBox(height: 20),
@@ -114,33 +112,26 @@ class HomePage extends StatelessWidget {
                     child: Container(
                       padding: const EdgeInsets.all(20),
                       decoration: BoxDecoration(
-                        color: Colors.grey[100],
+                        color: theme.cardColor,
                         borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: Colors.grey[300]!),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.05),
-                            blurRadius: 10,
-                            offset: const Offset(0, 4),
-                          ),
-                        ],
+                        border: Border.all(color: theme.dividerColor),
                       ),
                       child: Row(
                         children: [
                           Container(
                             padding: const EdgeInsets.all(8),
                             decoration: BoxDecoration(
-                              color: AppColors.coral.withValues(alpha: 0.1),
+                              color: theme.colorScheme.primary.withValues(alpha: 0.1),
                               shape: BoxShape.circle,
                             ),
-                            child: const Icon(Icons.mic_none, color: AppColors.coral, size: 28),
+                            child: Icon(Icons.mic_none, color: theme.colorScheme.primary, size: 28),
                           ),
                           const SizedBox(width: 15),
-                          const Text(
-                            'Tap to speak and translate',
+                          Text(
+                            tapToSpeak,
                             style: TextStyle(
                               fontSize: 16,
-                              color: Colors.grey,
+                              color: theme.textTheme.bodyMedium?.color,
                             ),
                           ),
                         ],
@@ -149,12 +140,12 @@ class HomePage extends StatelessWidget {
                   ),
                   const SizedBox(height: 30),
 
-                  const Text(
-                    'More tools',
+                  Text(
+                    moreTools,
                     style: TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
-                      color: Colors.black,
+                      color: theme.textTheme.titleLarge?.color,
                     ),
                   ),
                   const SizedBox(height: 15),
@@ -169,25 +160,25 @@ class HomePage extends StatelessWidget {
                     children: [
                       _QuickActionCard(
                         icon: Icons.history,
-                        title: "History",
+                        title: lang == 'Indonesia' ? 'Riwayat' : (lang == '中文' ? '历史记录' : 'History'),
                         onTap: () => context.push('/history'),
                         color: AppColors.sky,
                       ),
                       _QuickActionCard(
                         icon: Icons.star_border,
-                        title: "Favorite",
+                        title: lang == 'Indonesia' ? 'Favorit' : (lang == '中文' ? '收藏' : 'Favorite'),
                         onTap: () => context.push('/favorite'),
                         color: AppColors.violet,
                       ),
                       _QuickActionCard(
                         icon: Icons.cloud_off,
-                        title: "Offline",
+                        title: lang == 'Indonesia' ? 'Offline' : (lang == '中文' ? '离线' : 'Offline'),
                         onTap: () => context.push('/offline'),
                         color: AppColors.mint,
                       ),
                       _QuickActionCard(
                         icon: Icons.settings,
-                        title: "Settings",
+                        title: lang == 'Indonesia' ? 'Pengaturan' : (lang == '中文' ? '设置' : 'Settings'),
                         onTap: () => context.push('/settings'),
                         color: AppColors.orange,
                       ),
@@ -218,18 +209,12 @@ class _QuickActionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: theme.cardColor,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.grey[200]!),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.03),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
+        border: Border.all(color: theme.dividerColor),
       ),
       child: InkWell(
         borderRadius: BorderRadius.circular(20),
@@ -251,7 +236,7 @@ class _QuickActionCard extends StatelessWidget {
               title,
               style: TextStyle(
                 fontWeight: FontWeight.w600,
-                color: Colors.grey[800],
+                color: theme.textTheme.bodyMedium?.color,
               ),
             ),
           ],

@@ -8,7 +8,6 @@ import '../features/history/presentation/pages/history_page.dart';
 import '../features/settings/presentation/settings_page.dart';
 import '../features/offline/presentation/offline_page.dart';
 import '../features/favorite/presentation/pages/favorite_page.dart';
-import '../shared/widgets/placeholder_page.dart';
 
 final GoRouter appRouter = GoRouter(
   initialLocation: '/',
