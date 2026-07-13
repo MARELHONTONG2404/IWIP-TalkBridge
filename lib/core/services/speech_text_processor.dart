@@ -2,10 +2,7 @@ import 'package:speech_to_text/speech_recognition_result.dart';
 
 class SpeechTextProcessor {
   static String pickBestText(SpeechRecognitionResult result) {
-    if (result.recognizedWords.isNotEmpty) {
-      return result.recognizedWords;
-    }
-    if (result.alternates.isEmpty) return '';
+    if (result.alternates.isEmpty) return result.recognizedWords;
 
     SpeechRecognitionWords best = result.alternates.first;
     for (final alternate in result.alternates) {
@@ -19,7 +16,9 @@ class SpeechTextProcessor {
       }
     }
 
-    return best.recognizedWords;
+    return best.recognizedWords.isNotEmpty
+        ? best.recognizedWords
+        : result.recognizedWords;
   }
 
   static String postProcess(String raw, String languageCode) {
@@ -40,7 +39,10 @@ class SpeechTextProcessor {
       r'\b(?:lotpong|pong|long|ding)\b',
       caseSensitive: false,
     );
-    return text.replaceAll(garbagePattern, '').replaceAll(RegExp(r'\s+'), ' ').trim();
+    return text
+        .replaceAll(garbagePattern, '')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
   }
 
   static String mergeSession(String committed, String incoming) {
@@ -51,7 +53,8 @@ class SpeechTextProcessor {
     if (base.endsWith(next)) return base;
     if (next.startsWith(base)) return next;
 
-    final needsSpace = !base.endsWith('.') &&
+    final needsSpace =
+        !base.endsWith('.') &&
         !base.endsWith('!') &&
         !base.endsWith('?') &&
         !base.endsWith(',');
@@ -102,6 +105,11 @@ class SpeechTextProcessor {
         RegExp(r'\bbagaimana\b', caseSensitive: false): 'bagaimana',
         RegExp(r'\btidak\b', caseSensitive: false): 'tidak',
         RegExp(r'\bbisa\b', caseSensitive: false): 'bisa',
+        // Koreksi fonetik nama yang sering salah didengar oleh speech engine.
+        RegExp(
+          r'\bmarel\s+(?:lontong|lantong|luntung|hontong)\b',
+          caseSensitive: false,
+        ): 'Marel Hontong',
       };
       for (final entry in replacements.entries) {
         fixed = fixed.replaceAll(entry.key, entry.value);

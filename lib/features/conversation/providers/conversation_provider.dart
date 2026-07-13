@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/services/translation_service.dart';
 import '../../language/data/language_model.dart';
+import '../../history/providers/history_provider.dart';
+import '../../settings/providers/settings_provider.dart';
 
 class ConversationState {
   final LanguageModel sourceLanguage;
@@ -46,7 +48,38 @@ class ConversationState {
 }
 
 class ConversationNotifier extends StateNotifier<ConversationState> {
-  ConversationNotifier() : super(_initialState);
+  final Ref _ref;
+
+  ConversationNotifier(this._ref) : super(ConversationState(
+    sourceLanguage: _getLanguageFromSettings(
+      _ref.read(settingsProvider).defaultSourceLang,
+      fallbackCode: 'id',
+    ),
+    targetLanguage: _getLanguageFromSettings(
+      _ref.read(settingsProvider).defaultTargetLang,
+      fallbackCode: 'en',
+    ),
+    speakerText: speakerPlaceholder,
+    translatedText: translationPlaceholder,
+    isListening: false,
+    isTranslating: false,
+    isSpeakerDraft: false,
+  ));
+
+  static LanguageModel _getLanguageFromSettings(String name, {required String fallbackCode}) {
+    final nameLower = name.toLowerCase();
+    for (final lang in languages) {
+      if (lang.name.toLowerCase() == nameLower || lang.nativeName.toLowerCase() == nameLower) {
+        return lang;
+      }
+    }
+    if (name == '中文') {
+      for (final lang in languages) {
+        if (lang.code == 'zh') return lang;
+      }
+    }
+    return languageByCode(fallbackCode);
+  }
 
   final TranslationService _translator = TranslationService();
   Timer? _translateDebounce;
@@ -61,21 +94,19 @@ class ConversationNotifier extends StateNotifier<ConversationState> {
     translationPlaceholder,
   };
 
-  static final ConversationState _initialState = ConversationState(
-    sourceLanguage: languages.first,
-    targetLanguage: languages[1],
-    speakerText: speakerPlaceholder,
-    translatedText: translationPlaceholder,
-    isListening: false,
-    isTranslating: false,
-    isSpeakerDraft: false,
-  );
-
   void swapLanguage() {
     state = state.copyWith(
       sourceLanguage: state.targetLanguage,
       targetLanguage: state.sourceLanguage,
       translatedText: translationPlaceholder,
+    );
+  }
+
+  void reset() {
+    state = state.copyWith(
+      speakerText: speakerPlaceholder,
+      translatedText: translationPlaceholder,
+      isSpeakerDraft: false,
     );
   }
 
@@ -154,6 +185,12 @@ class ConversationNotifier extends StateNotifier<ConversationState> {
         translatedText: translated,
         isSpeakerDraft: false,
       );
+
+      // Save to history if enabled in settings
+      final settings = _ref.read(settingsProvider);
+      if (settings.autoSaveHistory) {
+        _ref.read(historyListProvider.notifier).addHistoryItem(sourceText, translated);
+      }
     } on TranslationException catch (e) {
       state = state.copyWith(
         translatedText: e.message,
@@ -198,5 +235,5 @@ class ConversationNotifier extends StateNotifier<ConversationState> {
 
 final conversationProvider =
     StateNotifierProvider<ConversationNotifier, ConversationState>(
-  (ref) => ConversationNotifier(),
+  (ref) => ConversationNotifier(ref),
 );

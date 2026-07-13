@@ -16,6 +16,8 @@ class SettingsState {
   final bool autoPlayTranslation;
   final bool autoSaveHistory;
   final bool notifications;
+  final String userName;
+  final String userEmail;
 
   SettingsState({
     required this.darkMode,
@@ -27,6 +29,8 @@ class SettingsState {
     required this.autoPlayTranslation,
     required this.autoSaveHistory,
     required this.notifications,
+    required this.userName,
+    required this.userEmail,
   });
 
   SettingsState copyWith({
@@ -39,6 +43,8 @@ class SettingsState {
     bool? autoPlayTranslation,
     bool? autoSaveHistory,
     bool? notifications,
+    String? userName,
+    String? userEmail,
   }) {
     return SettingsState(
       darkMode: darkMode ?? this.darkMode,
@@ -50,6 +56,8 @@ class SettingsState {
       autoPlayTranslation: autoPlayTranslation ?? this.autoPlayTranslation,
       autoSaveHistory: autoSaveHistory ?? this.autoSaveHistory,
       notifications: notifications ?? this.notifications,
+      userName: userName ?? this.userName,
+      userEmail: userEmail ?? this.userEmail,
     );
   }
 }
@@ -67,6 +75,8 @@ class SettingsNotifier extends StateNotifier<SettingsState> {
     autoPlayTranslation: _prefs.getBool('autoPlayTranslation') ?? true,
     autoSaveHistory: _prefs.getBool('autoSaveHistory') ?? true,
     notifications: _prefs.getBool('notifications') ?? true,
+    userName: _prefs.getString('userName') ?? 'Guest User',
+    userEmail: _prefs.getString('userEmail') ?? 'guest@iwip.com',
   ));
 
   void updateDarkMode(bool value) {
@@ -108,6 +118,12 @@ class SettingsNotifier extends StateNotifier<SettingsState> {
   void updateNotifications(bool value) {
     state = state.copyWith(notifications: value);
     _prefs.setBool('notifications', value);
+  }
+
+  void updateProfile(String name, String email) {
+    state = state.copyWith(userName: name, userEmail: email);
+    _prefs.setString('userName', name);
+    _prefs.setString('userEmail', email);
   }
 }
 

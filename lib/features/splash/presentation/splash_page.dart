@@ -67,7 +67,7 @@ class _SplashPageState extends State<SplashPage> with TickerProviderStateMixin {
     _logoController.forward();
 
     Future<void>.delayed(const Duration(milliseconds: 2800), () {
-      if (mounted) context.go('/welcome');
+      if (mounted) context.go('/home');
     });
   }
 
@@ -100,7 +100,10 @@ class _SplashPageState extends State<SplashPage> with TickerProviderStateMixin {
               children: [
                 const Spacer(flex: 2),
                 AnimatedBuilder(
-                  animation: Listenable.merge([_logoController, _pulseController]),
+                  animation: Listenable.merge([
+                    _logoController,
+                    _pulseController,
+                  ]),
                   builder: (context, _) {
                     final pulse = 1 + (_pulseController.value * 0.06);
                     return Opacity(
@@ -125,9 +128,7 @@ class _SplashPageState extends State<SplashPage> with TickerProviderStateMixin {
                             Text(
                               'IWIP TalkBridge',
                               textAlign: TextAlign.center,
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .headlineMedium
+                              style: Theme.of(context).textTheme.headlineMedium
                                   ?.copyWith(
                                     color: Colors.white,
                                     fontWeight: FontWeight.w900,
@@ -140,11 +141,11 @@ class _SplashPageState extends State<SplashPage> with TickerProviderStateMixin {
                               child: Text(
                                 'Break language barriers instantly ✨',
                                 textAlign: TextAlign.center,
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .bodyLarge
+                                style: Theme.of(context).textTheme.bodyLarge
                                     ?.copyWith(
-                                      color: Colors.white.withValues(alpha: 0.9),
+                                      color: Colors.white.withValues(
+                                        alpha: 0.9,
+                                      ),
                                       fontWeight: FontWeight.w500,
                                     ),
                               ),
@@ -176,7 +177,10 @@ class _SplashLogo extends StatelessWidget {
       decoration: BoxDecoration(
         shape: BoxShape.circle,
         color: Colors.white,
-        border: Border.all(color: Colors.white.withValues(alpha: 0.45), width: 2),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.45),
+          width: 2,
+        ),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.12),

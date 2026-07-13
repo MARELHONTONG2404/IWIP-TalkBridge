@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../../../language/data/language_model.dart';
@@ -13,6 +14,8 @@ class ConversationPanel extends StatelessWidget {
   final bool isLoading;
   final bool isPlaceholder;
   final VoidCallback? onSpeak;
+  final VoidCallback? onFavorite;
+  final bool isFavorite;
 
   const ConversationPanel({
     super.key,
@@ -25,6 +28,8 @@ class ConversationPanel extends StatelessWidget {
     this.isLoading = false,
     this.isPlaceholder = false,
     this.onSpeak,
+    this.onFavorite,
+    this.isFavorite = false,
   });
 
   @override
@@ -117,6 +122,28 @@ class ConversationPanel extends StatelessWidget {
                       IconButton(
                         onPressed: onSpeak,
                         icon: Icon(Icons.volume_up, color: accentColor),
+                      ),
+                    if (onFavorite != null && !isPlaceholder && !isLoading)
+                      IconButton(
+                        onPressed: onFavorite,
+                        icon: Icon(
+                          isFavorite ? Icons.star_rounded : Icons.star_border_rounded,
+                          color: isFavorite ? Colors.amber : accentColor,
+                        ),
+                      ),
+                    if (!isPlaceholder && !isLoading)
+                      IconButton(
+                        onPressed: () {
+                          Clipboard.setData(ClipboardData(text: text));
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Copied to clipboard!'),
+                              duration: Duration(seconds: 1),
+                              behavior: SnackBarBehavior.floating,
+                            ),
+                          );
+                        },
+                        icon: Icon(Icons.copy_rounded, color: accentColor),
                       ),
                     if (isDraft)
                       Container(

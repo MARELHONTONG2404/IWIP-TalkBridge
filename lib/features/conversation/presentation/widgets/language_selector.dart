@@ -51,20 +51,15 @@ class LanguageSelector extends StatelessWidget {
                   padding: EdgeInsets.all(20),
                   child: Text(
                     'Pilih Bahasa',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                   ),
                 ),
                 Expanded(
                   child: ListView.separated(
                     controller: scrollController,
                     itemCount: languages.length,
-                    separatorBuilder: (_, _) => Divider(
-                      height: 1,
-                      color: Colors.grey.shade200,
-                    ),
+                    separatorBuilder: (_, _) =>
+                        Divider(height: 1, color: Colors.grey.shade200),
                     itemBuilder: (context, index) {
                       final language = languages[index];
                       final isSelected = language.code == selected.code;
@@ -77,8 +72,9 @@ class LanguageSelector extends StatelessWidget {
                         title: Text(
                           language.nativeName,
                           style: TextStyle(
-                            fontWeight:
-                                isSelected ? FontWeight.bold : FontWeight.w600,
+                            fontWeight: isSelected
+                                ? FontWeight.bold
+                                : FontWeight.w600,
                             fontSize: 17,
                           ),
                         ),
@@ -108,117 +104,83 @@ class LanguageSelector extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final primary = Theme.of(context).colorScheme.primary;
-
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.06),
-            blurRadius: 16,
-            offset: const Offset(0, 6),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: _LanguageChip(
-              label: 'From',
-              language: sourceLanguage,
-              color: primary,
-              onTap: () => _openPicker(
-                context,
-                selected: sourceLanguage,
-                onSelected: onSourceChanged,
-              ),
+    final colors = Theme.of(context).colorScheme;
+    return Row(
+      children: [
+        Expanded(
+          child: _LanguageChip(
+            language: sourceLanguage,
+            onTap: () => _openPicker(
+              context,
+              selected: sourceLanguage,
+              onSelected: onSourceChanged,
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            child: Material(
-              color: primary.withValues(alpha: 0.1),
-              shape: const CircleBorder(),
-              child: InkWell(
-                customBorder: const CircleBorder(),
-                onTap: onSwap,
-                child: Padding(
-                  padding: const EdgeInsets.all(10),
-                  child: Icon(Icons.swap_horiz_rounded, color: primary),
-                ),
-              ),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          child: IconButton(
+            onPressed: onSwap,
+            icon: Icon(
+              Icons.arrow_forward_rounded,
+              color: colors.onSurfaceVariant,
+              size: 34,
             ),
           ),
-          Expanded(
-            child: _LanguageChip(
-              label: 'To',
-              language: targetLanguage,
-              color: const Color(0xFF059669),
-              onTap: () => _openPicker(
-                context,
-                selected: targetLanguage,
-                onSelected: onTargetChanged,
-              ),
+        ),
+        Expanded(
+          child: _LanguageChip(
+            language: targetLanguage,
+            onTap: () => _openPicker(
+              context,
+              selected: targetLanguage,
+              onSelected: onTargetChanged,
             ),
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
 
 class _LanguageChip extends StatelessWidget {
-  final String label;
   final LanguageModel language;
-  final Color color;
   final VoidCallback onTap;
 
-  const _LanguageChip({
-    required this.label,
-    required this.language,
-    required this.color,
-    required this.onTap,
-  });
+  const _LanguageChip({required this.language, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     return Material(
-      color: color.withValues(alpha: 0.08),
-      borderRadius: BorderRadius.circular(16),
+      color: colors.surface,
+      borderRadius: BorderRadius.circular(22),
       child: InkWell(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(22),
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-          child: Column(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 18),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Text(
-                label.toUpperCase(),
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 1.1,
-                  color: color,
+              Flexible(
+                child: Text(
+                  language.nativeName,
+                  textAlign: TextAlign.center,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 17,
+                    color: colors.onSurface,
+                  ),
                 ),
               ),
-              const SizedBox(height: 8),
-              Text(
-                language.flag,
-                style: const TextStyle(fontSize: 26),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                language.nativeName,
-                textAlign: TextAlign.center,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontWeight: FontWeight.w700,
-                  fontSize: 15,
-                ),
+              const SizedBox(width: 6),
+              Icon(
+                Icons.expand_more_rounded,
+                color: colors.onSurfaceVariant,
+                size: 20,
               ),
             ],
           ),

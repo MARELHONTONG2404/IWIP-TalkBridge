@@ -108,7 +108,7 @@ class HomePage extends ConsumerWidget {
 
                   // Minimalist Input Box (Core Feature)
                   InkWell(
-                    onTap: () => context.go('/translate'),
+                    onTap: () => context.push('/translate'),
                     child: Container(
                       padding: const EdgeInsets.all(20),
                       decoration: BoxDecoration(

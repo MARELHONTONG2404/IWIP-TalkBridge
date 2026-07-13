@@ -4,23 +4,22 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../../core/services/speech_service.dart';
 import '../../../../core/services/speech_text_processor.dart';
 import '../../../../core/services/tts_service.dart';
 import '../../providers/conversation_provider.dart';
 import '../../../settings/providers/settings_provider.dart';
+import '../../../favorite/providers/favorite_provider.dart';
 
-import '../widgets/conversation_panel.dart';
 import '../widgets/language_selector.dart';
-import '../widgets/microphone_button.dart';
 
 class ConversationPage extends ConsumerStatefulWidget {
   const ConversationPage({super.key});
 
   @override
-  ConsumerState<ConversationPage> createState() =>
-      _ConversationPageState();
+  ConsumerState<ConversationPage> createState() => _ConversationPageState();
 }
 
 class _ConversationPageState extends ConsumerState<ConversationPage> {
@@ -33,8 +32,7 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
   String _committedText = '';
   String _livePartial = '';
 
-  bool get _isMobile =>
-      !kIsWeb && (Platform.isAndroid || Platform.isIOS);
+  bool get _isMobile => !kIsWeb && (Platform.isAndroid || Platform.isIOS);
 
   @override
   void initState() {
@@ -56,7 +54,19 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
         if (!mounted) return;
 
         ref.read(conversationProvider.notifier).stopListening();
-        _showMessage(message);
+
+        // Show clearer error and suggest retry
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(message),
+            action: SnackBarAction(
+              label: 'Retry',
+              onPressed: () {
+                _startListening();
+              },
+            ),
+          ),
+        );
       },
       onStatus: (status) {
         if (!mounted) return;
@@ -119,10 +129,7 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
       final notifier = ref.read(conversationProvider.notifier);
 
       if (isFinal) {
-        _committedText = SpeechTextProcessor.mergeSession(
-          _committedText,
-          text,
-        );
+        _committedText = SpeechTextProcessor.mergeSession(_committedText, text);
         _livePartial = '';
         notifier.setSpeakerText(_committedText, isDraft: false);
         notifier.translate(_committedText);
@@ -192,7 +199,8 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
     } else if (_activeLocale != null &&
         _normalizeLocaleId(_activeLocale!) !=
             _normalizeLocaleId(sourceLanguage.speechCode) &&
-        _languageKey(_activeLocale!) != _languageKey(sourceLanguage.speechCode)) {
+        _languageKey(_activeLocale!) !=
+            _languageKey(sourceLanguage.speechCode)) {
       _showMessage(
         'Speech engine: $_activeLocale. '
         'Unduh ${sourceLanguage.nativeName} di Google app → Voice jika teks salah.',
@@ -239,153 +247,380 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
         text == 'Mendengarkan...';
   }
 
+  void _showTextInputDialog() {
+    final controller = TextEditingController(
+      text: _isPlaceholder(ref.read(conversationProvider).speakerText)
+          ? ''
+          : ref.read(conversationProvider).speakerText,
+    );
+    showDialog(
+      context: context,
+      builder: (context) {
+        final settings = ref.read(settingsProvider);
+        final lang = settings.appLanguage;
+        final title = lang == 'Indonesia'
+            ? 'Ketik Teks'
+            : (lang == '中文' ? '输入文本' : 'Type Text');
+        final hint = lang == 'Indonesia'
+            ? 'Masukkan teks untuk diterjemahkan...'
+            : (lang == '中文' ? '输入要翻译的文本...' : 'Enter text to translate...');
+
+        return AlertDialog(
+          title: Text(title),
+          content: TextField(
+            controller: controller,
+            maxLines: 4,
+            decoration: InputDecoration(
+              hintText: hint,
+              border: const OutlineInputBorder(),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text(
+                lang == 'Indonesia'
+                    ? 'Batal'
+                    : (lang == '中文' ? '取消' : 'Cancel'),
+              ),
+            ),
+            TextButton(
+              onPressed: () {
+                final text = controller.text.trim();
+                Navigator.pop(context);
+                if (text.isNotEmpty) {
+                  final notifier = ref.read(conversationProvider.notifier);
+                  notifier.setSpeakerText(text, isDraft: false);
+                  notifier.translate(text);
+                }
+              },
+              child: Text(
+                lang == 'Indonesia'
+                    ? 'Terjemahkan'
+                    : (lang == '中文' ? '翻译' : 'Translate'),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(conversationProvider);
     final settings = ref.watch(settingsProvider);
     final micActive = _soundLevel > 1;
     final theme = Theme.of(context);
-    final primary = theme.colorScheme.primary;
-
+    final colors = theme.colorScheme;
+    final panelColor = colors.surface;
+    final textColor = colors.onSurface;
+    final mutedTextColor = colors.onSurfaceVariant;
     final lang = settings.appLanguage;
-    final title = lang == 'Indonesia' ? 'Terjemahan Langsung' : (lang == '中文' ? '实时翻译' : 'Live Translation');
+    final title = lang == 'Indonesia'
+        ? 'Terjemahan'
+        : (lang == '中文' ? '翻译' : 'Translate');
+    final inputHint = lang == 'Indonesia'
+        ? 'Terjemahkan teks'
+        : (lang == '中文' ? '翻译文本' : 'Translate text');
+    final conversationLabel = lang == 'Indonesia'
+        ? 'Percakapan'
+        : (lang == '中文' ? '对话' : 'Conversation');
+    final cameraLabel = lang == 'Indonesia'
+        ? 'Kamera'
+        : (lang == '中文' ? '相机' : 'Camera');
 
     final statusText = state.isListening
         ? micActive
-            ? (lang == 'Indonesia' ? 'Mic aktif' : (lang == '中文' ? '麦克风开启' : 'Mic active'))
-            : (lang == 'Indonesia' ? 'Mendengarkan...' : (lang == '中文' ? '正在听...' : 'Listening...'))
+              ? (lang == 'Indonesia'
+                    ? 'Mic aktif'
+                    : (lang == '中文' ? '麦克风开启' : 'Mic active'))
+              : (lang == 'Indonesia'
+                    ? 'Mendengarkan...'
+                    : (lang == '中文' ? '正在听...' : 'Listening...'))
         : _initializing
-            ? (lang == 'Indonesia' ? 'Menyiapkan...' : (lang == '中文' ? '准备中...' : 'Initializing...'))
-            : _speechReady
-                ? (lang == 'Indonesia' ? 'Tap mic untuk mulai' : (lang == '中文' ? '点击麦克风开始' : 'Tap mic to start'))
-                : (lang == 'Indonesia' ? 'Mic tidak siap' : (lang == '中文' ? '麦克风未就绪' : 'Mic not ready'));
+        ? (lang == 'Indonesia'
+              ? 'Menyiapkan...'
+              : (lang == '中文' ? '准备中...' : 'Initializing...'))
+        : _speechReady
+        ? (lang == 'Indonesia'
+              ? 'Tap mic untuk mulai'
+              : (lang == '中文' ? '点击麦克风开始' : 'Tap mic to start'))
+        : (lang == 'Indonesia'
+              ? 'Mic tidak siap'
+              : (lang == '中文' ? '麦克风未就绪' : 'Mic not ready'));
 
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
       appBar: AppBar(
         elevation: 0,
-        backgroundColor: theme.scaffoldBackgroundColor,
+        backgroundColor: panelColor,
         leading: IconButton(
-          icon: Icon(Icons.arrow_back_ios_new, color: theme.iconTheme.color, size: 20),
-          onPressed: () => Navigator.pop(context),
+          icon: Icon(Icons.arrow_back_ios_new, color: textColor, size: 20),
+          onPressed: () {
+            if (context.canPop()) {
+              context.pop();
+            } else {
+              context.go('/home');
+            }
+          },
         ),
         title: Text(
           title,
-          style: TextStyle(fontWeight: FontWeight.w700, color: theme.textTheme.titleLarge?.color),
+          style: TextStyle(fontWeight: FontWeight.w700, color: textColor),
         ),
         centerTitle: true,
+        actions: [
+          IconButton(
+            tooltip: lang == 'Indonesia' ? 'Favorit' : 'Favorites',
+            onPressed: () => context.push('/favorite'),
+            icon: Icon(Icons.star_border_rounded, color: textColor),
+          ),
+          const SizedBox(width: 4),
+        ],
       ),
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(18, 8, 18, 18),
-          child: Column(
-            children: [
-              LanguageSelector(
-                sourceLanguage: state.sourceLanguage,
-                targetLanguage: state.targetLanguage,
-                onSourceChanged: (language) {
-                  ref
-                      .read(conversationProvider.notifier)
-                      .setSourceLanguage(language);
-                },
-                onTargetChanged: (language) {
-                  ref
-                      .read(conversationProvider.notifier)
-                      .setTargetLanguage(language);
-                },
-                onSwap: () {
-                  ref.read(conversationProvider.notifier).swapLanguage();
-                },
-              ),
-              if (_activeLocale != null) ...[
-                const SizedBox(height: 10),
-                Text(
-                  'Speech engine: $_activeLocale',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: theme.textTheme.bodySmall?.color,
+        child: Column(
+          children: [
+            Expanded(
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.fromLTRB(28, 28, 28, 20),
+                decoration: BoxDecoration(
+                  color: panelColor,
+                  borderRadius: BorderRadius.vertical(
+                    bottom: Radius.circular(34),
                   ),
                 ),
-              ],
-              const SizedBox(height: 18),
-              Expanded(
-                child: SingleChildScrollView(
-                  child: Column(
-                    children: [
-                      ConversationPanel(
-                        language: state.sourceLanguage,
-                        icon: Icons.mic_rounded,
-                        subtitle: 'Recognized speech',
-                        text: state.speakerText,
-                        accentColor: primary,
-                        isDraft: state.isSpeakerDraft,
-                        isPlaceholder: _isPlaceholder(state.speakerText),
-                      ),
-                      const SizedBox(height: 16),
-                      ConversationPanel(
-                        language: state.targetLanguage,
-                        icon: Icons.translate_rounded,
-                        subtitle: 'Translated result',
-                        text: state.translatedText,
-                        accentColor: const Color(0xFF059669),
-                        isLoading: state.isTranslating,
-                        isPlaceholder: _isPlaceholder(state.translatedText),
-                        onSpeak: () {
-                          print('DEBUG: TTS started for: "${state.translatedText}"');
-                          final settings = ref.read(settingsProvider);
-
-                          // Use settings
-                          final rate = settings.speechSpeed == 'Slow' ? 0.3 : (settings.speechSpeed == 'Fast' ? 0.8 : 0.5);
-
-                          _ttsService.speak(
-                            state.translatedText,
-                            languageCode: state.targetLanguage.code,
-                          );
-                          print('DEBUG: TTS rate set to: $rate');
-                        },
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              if (state.isListening)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 14),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(99),
-                    child: LinearProgressIndicator(
-                      value: (_soundLevel / 10).clamp(0.05, 1.0),
-                      minHeight: 6,
-                      backgroundColor: Colors.grey.shade300,
-                      color: primary,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(28),
+                  onTap: _showTextInputDialog,
+                  child: SingleChildScrollView(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                _isPlaceholder(state.speakerText)
+                                    ? inputHint
+                                    : state.speakerText,
+                                style: TextStyle(
+                                  fontSize: _isPlaceholder(state.speakerText)
+                                      ? 34
+                                      : 28,
+                                  height: 1.18,
+                                  color: _isPlaceholder(state.speakerText)
+                                      ? mutedTextColor
+                                      : textColor,
+                                  fontWeight: FontWeight.w400,
+                                ),
+                              ),
+                            ),
+                            Icon(
+                              Icons.edit_note_rounded,
+                              color: mutedTextColor,
+                              size: 34,
+                            ),
+                          ],
+                        ),
+                        if (state.isListening) ...[
+                          const SizedBox(height: 20),
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(99),
+                            child: LinearProgressIndicator(
+                              value: (_soundLevel / 10).clamp(0.05, 1.0),
+                              minHeight: 5,
+                              backgroundColor: colors.surfaceContainerHighest,
+                              color: colors.primary,
+                            ),
+                          ),
+                        ],
+                        if (!_isPlaceholder(state.translatedText)) ...[
+                          Padding(
+                            padding: EdgeInsets.symmetric(vertical: 24),
+                            child: Divider(
+                              color: colors.outlineVariant,
+                              height: 1,
+                            ),
+                          ),
+                          if (state.isTranslating)
+                            Center(
+                              child: CircularProgressIndicator(
+                                color: colors.primary,
+                              ),
+                            )
+                          else ...[
+                            Text(
+                              state.translatedText,
+                              style: TextStyle(
+                                fontSize: 27,
+                                height: 1.25,
+                                color: textColor,
+                              ),
+                            ),
+                            const SizedBox(height: 14),
+                            Row(
+                              children: [
+                                IconButton(
+                                  onPressed: () => _ttsService.speak(
+                                    state.translatedText,
+                                    languageCode: state.targetLanguage.code,
+                                  ),
+                                  icon: Icon(
+                                    Icons.volume_up_rounded,
+                                    color: mutedTextColor,
+                                  ),
+                                ),
+                                IconButton(
+                                  onPressed: () => ref
+                                      .read(favoriteProvider.notifier)
+                                      .toggleFavorite(
+                                        sourceLang: state.sourceLanguage.name,
+                                        targetLang: state.targetLanguage.name,
+                                        originalText: state.speakerText,
+                                        translatedText: state.translatedText,
+                                      ),
+                                  icon: Icon(
+                                    ref
+                                            .watch(favoriteProvider.notifier)
+                                            .isFavorite(
+                                              state.speakerText,
+                                              state.translatedText,
+                                            )
+                                        ? Icons.star_rounded
+                                        : Icons.star_border_rounded,
+                                    color: colors.primary,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ],
+                      ],
                     ),
                   ),
                 ),
-              MicrophoneButton(
-                isListening: state.isListening,
-                onPressed: () async {
-                  if (state.isListening) {
-                    await _stopListening();
-                  } else {
-                    await _startListening();
-                  }
-                },
               ),
-              const SizedBox(height: 12),
-              Text(
-                statusText,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: Colors.grey.shade700,
-                  fontWeight: FontWeight.w500,
-                ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(28, 28, 28, 14),
+              child: LanguageSelector(
+                sourceLanguage: state.sourceLanguage,
+                targetLanguage: state.targetLanguage,
+                onSourceChanged: (language) => ref
+                    .read(conversationProvider.notifier)
+                    .setSourceLanguage(language),
+                onTargetChanged: (language) => ref
+                    .read(conversationProvider.notifier)
+                    .setTargetLanguage(language),
+                onSwap: () =>
+                    ref.read(conversationProvider.notifier).swapLanguage(),
               ),
-              const SizedBox(height: 8),
-            ],
-          ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 26),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: _ActionButton(
+                      icon: Icons.people_alt_outlined,
+                      label: conversationLabel,
+                      onTap: _showTextInputDialog,
+                    ),
+                  ),
+                  Expanded(
+                    child: _ActionButton(
+                      icon: state.isListening
+                          ? Icons.stop_rounded
+                          : Icons.mic_rounded,
+                      label: statusText,
+                      isPrimary: true,
+                      isActive: state.isListening || micActive,
+                      onTap: () async {
+                        if (state.isListening) {
+                          await _stopListening();
+                        } else {
+                          await _startListening();
+                        }
+                      },
+                    ),
+                  ),
+                  Expanded(
+                    child: _ActionButton(
+                      icon: Icons.document_scanner_outlined,
+                      label: cameraLabel,
+                      onTap: () => _showMessage(
+                        lang == 'Indonesia'
+                            ? 'Terjemahan dari kamera akan segera tersedia.'
+                            : 'Camera translation will be available soon.',
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
+    );
+  }
+}
+
+class _ActionButton extends StatelessWidget {
+  const _ActionButton({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.isPrimary = false,
+    this.isActive = false,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  final bool isPrimary;
+  final bool isActive;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final color = isPrimary
+        ? (isActive ? colors.error : colors.primary)
+        : colors.secondary;
+    final size = isPrimary ? 88.0 : 60.0;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Material(
+          color: color,
+          shape: const CircleBorder(),
+          child: InkWell(
+            onTap: onTap,
+            customBorder: const CircleBorder(),
+            child: SizedBox(
+              width: size,
+              height: size,
+              child: Icon(
+                icon,
+                size: isPrimary ? 36 : 28,
+                color: colors.onPrimary,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 10),
+        Text(
+          label,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          textAlign: TextAlign.center,
+          style: TextStyle(color: colors.onSurface, fontSize: 14),
+        ),
+      ],
     );
   }
 }

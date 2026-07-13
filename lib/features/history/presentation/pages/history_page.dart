@@ -14,7 +14,21 @@ class HistoryPage extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('History')),
       body: historyState.when(
-        data: (history) => ListView.builder(
+        data: (history) => history.isEmpty
+            ? Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.history_toggle_off_rounded, size: 80, color: Colors.grey[300]),
+                    const SizedBox(height: 16),
+                    const Text(
+                      'No history yet',
+                      style: TextStyle(fontSize: 18, color: Colors.grey, fontWeight: FontWeight.w500),
+                    ),
+                  ],
+                ),
+              )
+            : ListView.builder(
           itemCount: history.length,
           itemBuilder: (context, index) {
             final item = history[index];

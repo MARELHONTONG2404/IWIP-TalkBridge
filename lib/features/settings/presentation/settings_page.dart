@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import '../providers/settings_provider.dart';
+import '../../history/providers/history_provider.dart';
 
 class SettingsPage extends ConsumerWidget {
   const SettingsPage({super.key});
@@ -52,11 +53,58 @@ class SettingsPage extends ConsumerWidget {
         children: [
           Card(
             child: ListTile(
-              leading: const CircleAvatar(child: Icon(Icons.person)),
-              title: Text(t('User Profile', 'Profil Pengguna', '用户资料'), style: const TextStyle(fontWeight: FontWeight.bold)),
-              subtitle: Text(t('Edit your profile details', 'Edit detail profil Anda', '编辑您的个人资料')),
-              onTap: () {
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(t('Not implemented yet', 'Belum diimplementasikan', '尚未实现'))));
+              leading: CircleAvatar(
+                child: Text(
+                  settings.userName.isNotEmpty ? settings.userName[0].toUpperCase() : 'U',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ),
+              title: Text(settings.userName, style: const TextStyle(fontWeight: FontWeight.bold)),
+              subtitle: Text(settings.userEmail),
+              trailing: const Icon(Icons.edit_rounded, size: 20),
+              onTap: () async {
+                final nameController = TextEditingController(text: settings.userName);
+                final emailController = TextEditingController(text: settings.userEmail);
+                await showDialog(
+                  context: context,
+                  builder: (context) => AlertDialog(
+                    title: Text(t('Edit Profile', 'Edit Profil', '编辑个人资料')),
+                    content: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        TextField(
+                          controller: nameController,
+                          decoration: InputDecoration(
+                            labelText: t('Name', 'Nama', '姓名'),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        TextField(
+                          controller: emailController,
+                          decoration: InputDecoration(
+                            labelText: t('Email', 'Email', '电子邮件'),
+                          ),
+                        ),
+                      ],
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: Text(t('Cancel', 'Batal', '取消')),
+                      ),
+                      TextButton(
+                        onPressed: () {
+                          notifier.updateProfile(nameController.text.trim(), emailController.text.trim());
+                          Navigator.pop(context);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text(t('Profile updated', 'Profil diperbarui', '个人资料已更新'))),
+                          );
+                        },
+                        child: Text(t('Save', 'Simpan', '保存')),
+                      ),
+                    ],
+                  ),
+                );
               },
             ),
           ),
@@ -158,6 +206,7 @@ class SettingsPage extends ConsumerWidget {
                   TextButton(onPressed: () => Navigator.pop(c), child: Text(t('No', 'Tidak', '否'))),
                   TextButton(
                     onPressed: () {
+                      ref.read(historyListProvider.notifier).clearAll();
                       Navigator.pop(c);
                       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(t('History cleared', 'Riwayat dihapus', '历史记录已清除'))));
                     },
