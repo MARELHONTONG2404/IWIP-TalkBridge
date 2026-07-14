@@ -48,18 +48,15 @@ class SpeechService {
     SpeechErrorCallback? onError,
     SpeechStatusCallback? onStatus,
   }) async {
-    print('DEBUG: initialize() called');
     _lastError = null;
     _onError = onError;
     _onStatus = onStatus;
 
     _isAvailable = await _speech.initialize(
       onStatus: (status) {
-        print('DEBUG: onStatus: $status');
         _onStatus?.call(status);
       },
       onError: (error) {
-        print('DEBUG: onError: ${error.errorMsg}');
         if (error.errorMsg == 'error_no_match') return;
 
         if (_handleRecoverableError(error.errorMsg)) return;
@@ -70,7 +67,6 @@ class SpeechService {
       options: [SpeechToText.androidNoBluetooth],
     );
 
-    print('DEBUG: initialize() result: $_isAvailable');
     if (!_isAvailable) {
       if (kIsWeb) {
         _lastError = 'Browser Anda tidak mendukung Speech Recognition. '
@@ -257,15 +253,12 @@ class SpeechService {
     required SpeechResultCallback onResult,
     SpeechSoundLevelCallback? onSoundLevel,
   }) async {
-    print('DEBUG: startListening() called. locale: $localeId');
     if (!_isAvailable) {
-      print('DEBUG: Speech recognition not available');
       _lastError = 'Speech recognition tidak tersedia';
       return false;
     }
 
     final hasMicPermission = await _speech.hasPermission;
-    print('DEBUG: Permission microphone check: $hasMicPermission');
     if (!hasMicPermission) {
       _lastError =
           'Izin mikrofon belum diberikan. Tap mic lagi dan pilih Allow';
@@ -309,22 +302,17 @@ class SpeechService {
 
   Future<void> _listenWithLocale(String localeToken) async {
     if (_speech.isListening) {
-      print('DEBUG: Already listening, stopping...');
       await _speech.stop();
       await Future.delayed(const Duration(milliseconds: 300));
     }
 
-    print('DEBUG: Listening started with locale: $localeToken');
     _activeLocale = _resolveActiveLocaleLabel(localeToken);
 
-    print('DEBUG: Calling _speech.listen with options: localeId: ${_listenLocaleId(localeToken)}');
     
     try {
-      final success = await _speech.listen(
+      await _speech.listen(
         onResult: (result) {
-          print('DEBUG: [plugin] onResult called. final: ${result.finalResult}, words: "${result.recognizedWords}"');
           if (_onResult == null) {
-            print('DEBUG: [plugin] _onResult callback is null!');
             return;
           }
           _handleResult(result, _onResult!);
@@ -344,9 +332,8 @@ class SpeechService {
           enableHapticFeedback: true,
         ),
       );
-      print('DEBUG: _speech.listen() returned success: $success');
     } catch (e) {
-      print('DEBUG: Exception in _speech.listen(): $e');
+      // Ignore errors during speech listening initiation
     }
 
     if (_isRetryingLocale && _speech.isListening) {
@@ -364,11 +351,9 @@ class SpeechService {
     SpeechResultCallback onResult,
   ) {
     final raw = SpeechTextProcessor.pickBestText(result);
-    print('DEBUG: [handleResult] Raw words: "$raw" (final: ${result.finalResult}, conf: ${result.confidence})');
     if (raw.trim().isEmpty) return;
 
     final processed = SpeechTextProcessor.postProcess(raw, _languageCode);
-    print('DEBUG: [handleResult] Processed words: "$processed"');
     if (processed.isEmpty) return;
 
     final confidence = result.confidence;
@@ -377,7 +362,6 @@ class SpeechService {
     if (!result.finalResult) {
       final hasRating = result.hasConfidenceRating;
       if (hasRating && confidence < 0.05) {
-        print('DEBUG: [handleResult] Partial result filtered due to extremely low confidence: $confidence');
         return;
       }
     }
@@ -390,7 +374,6 @@ class SpeechService {
   }
 
   Future<void> stopListening() async {
-    print('DEBUG: Listening stopped');
     _onResult = null;
     _onSoundLevel = null;
     _localeFallbackChain = [];

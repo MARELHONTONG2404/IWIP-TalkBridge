@@ -15,6 +15,10 @@ import '../../../favorite/providers/favorite_provider.dart';
 
 import '../widgets/language_selector.dart';
 
+void _log(String message) {
+  if (kDebugMode) debugPrint(message);
+}
+
 class ConversationPage extends ConsumerStatefulWidget {
   const ConversationPage({super.key});
 
@@ -31,6 +35,7 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
   String? _activeLocale;
   String _committedText = '';
   String _livePartial = '';
+  bool _finalizingSpeech = false;
 
   bool get _isMobile => !kIsWeb && (Platform.isAndroid || Platform.isIOS);
 
@@ -71,6 +76,8 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
       onStatus: (status) {
         if (!mounted) return;
 
+         _log('[Speech Recognition] status=$status');
+
         if (status == 'doneNoResult') {
           ref.read(conversationProvider.notifier).stopListening();
           _showMessage(
@@ -78,7 +85,8 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
             'atau unduh paket bahasa di Google app → Voice.',
           );
         } else if (status == 'notListening' || status == 'done') {
-          ref.read(conversationProvider.notifier).stopListening();
+          // Speech engine finished — translate only after STT ends.
+          _finalizeSpeechAndTranslate();
         }
       },
     );
@@ -129,10 +137,13 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
       final notifier = ref.read(conversationProvider.notifier);
 
       if (isFinal) {
+        // Update committed text only — translate waits until speech ends.
         _committedText = SpeechTextProcessor.mergeSession(_committedText, text);
         _livePartial = '';
         notifier.setSpeakerText(_committedText, isDraft: false);
-        notifier.translate(_committedText);
+         _log(
+          '[Speech Recognition] final (${_committedText.length} chars)',
+        );
       } else {
         _livePartial = text;
         final preview = SpeechTextProcessor.mergeSession(
@@ -219,26 +230,59 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
   }
 
   Future<void> _stopListening() async {
-    print('DEBUG: _stopListening() called');
     await _speechService.stopListening();
+    await _finalizeSpeechAndTranslate();
+  }
 
-    final notifier = ref.read(conversationProvider.notifier);
-    final finalText = _committedText.trim().isNotEmpty
-        ? _committedText
-        : _livePartial.trim();
-    notifier.stopListening();
+  Future<void> _finalizeSpeechAndTranslate() async {
+    if (_finalizingSpeech) return;
+    _finalizingSpeech = true;
 
-    if (finalText.isNotEmpty &&
-        finalText != 'Mendengarkan...' &&
-        finalText != ConversationNotifier.speakerPlaceholder) {
+    try {
+      final notifier = ref.read(conversationProvider.notifier);
+      final finalText = _committedText.trim().isNotEmpty
+          ? _committedText
+          : _livePartial.trim();
+
+      notifier.stopListening();
+
+      if (!mounted) return;
+      setState(() => _soundLevel = 0);
+
+      if (finalText.isEmpty ||
+          finalText == 'Mendengarkan...' ||
+          finalText == ConversationNotifier.speakerPlaceholder) {
+         _log('[Speech Recognition] done with empty text — skip translate');
+        return;
+      }
+
       notifier.setSpeakerText(finalText, isDraft: false);
-      print('DEBUG: Translation started for: "$finalText"');
-      await notifier.translate(finalText);
-      print('DEBUG: Translation success');
-    }
+       _log(
+        '[Speech Recognition] done (${finalText.length} chars) → translate',
+      );
 
-    if (!mounted) return;
-    setState(() => _soundLevel = 0);
+      // Brief settle so final STT result is committed before API call.
+      await Future<void>.delayed(const Duration(milliseconds: 1000));
+      if (!mounted) return;
+
+      await notifier.translate(finalText);
+
+      if (!mounted) return;
+      final translatedText = ref.read(conversationProvider).translatedText;
+      final looksLikeError = translatedText.startsWith('Terjemahan timeout') ||
+          translatedText.startsWith('Terjemahan gagal') ||
+          translatedText.startsWith('Limit terjemahan');
+      if (translatedText.isNotEmpty &&
+          translatedText != ConversationNotifier.translationPlaceholder &&
+          !looksLikeError) {
+        _ttsService.speak(
+          translatedText,
+          languageCode: ref.read(conversationProvider).targetLanguage.code,
+        );
+      }
+    } finally {
+      _finalizingSpeech = false;
+    }
   }
 
   bool _isPlaceholder(String text) {
@@ -553,11 +597,7 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
                     child: _ActionButton(
                       icon: Icons.document_scanner_outlined,
                       label: cameraLabel,
-                      onTap: () => _showMessage(
-                        lang == 'Indonesia'
-                            ? 'Terjemahan dari kamera akan segera tersedia.'
-                            : 'Camera translation will be available soon.',
-                      ),
+                      onTap: () => context.push('/camera'),
                     ),
                   ),
                 ],

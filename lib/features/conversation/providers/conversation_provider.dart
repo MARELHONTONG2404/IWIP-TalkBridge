@@ -1,11 +1,17 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../core/services/offline_translation_service.dart';
 import '../../../../core/services/translation_service.dart';
 import '../../language/data/language_model.dart';
 import '../../history/providers/history_provider.dart';
 import '../../settings/providers/settings_provider.dart';
+
+void _log(String message) {
+  if (kDebugMode) debugPrint(message);
+}
 
 class ConversationState {
   final LanguageModel sourceLanguage;
@@ -82,6 +88,8 @@ class ConversationNotifier extends StateNotifier<ConversationState> {
   }
 
   final TranslationService _translator = TranslationService();
+  final OfflineTranslationService _offlineTranslator =
+      OfflineTranslationService();
   Timer? _translateDebounce;
 
   static const speakerPlaceholder = 'Tap mic and start speaking to translate...';
@@ -150,7 +158,7 @@ class ConversationNotifier extends StateNotifier<ConversationState> {
 
   void scheduleTranslate(String text) {
     _translateDebounce?.cancel();
-    _translateDebounce = Timer(const Duration(milliseconds: 700), () {
+    _translateDebounce = Timer(const Duration(milliseconds: 1000), () {
       translate(text);
     });
   }
@@ -164,6 +172,11 @@ class ConversationNotifier extends StateNotifier<ConversationState> {
       return;
     }
 
+    if (state.isListening) {
+       _log('[Speech Recognition] skip translate — still listening');
+      return;
+    }
+
     if (state.sourceLanguage.code == state.targetLanguage.code) {
       state = state.copyWith(
         translatedText: sourceText,
@@ -173,13 +186,12 @@ class ConversationNotifier extends StateNotifier<ConversationState> {
     }
 
     startTranslating();
+     _log(
+      '[Translation API] start (${sourceText.length} chars)',
+    );
 
     try {
-      final translated = await _translator.translate(
-        text: sourceText,
-        from: state.sourceLanguage.code,
-        to: state.targetLanguage.code,
-      );
+      final translated = await _translateWithOfflineFallback(sourceText);
 
       state = state.copyWith(
         translatedText: translated,
@@ -189,19 +201,76 @@ class ConversationNotifier extends StateNotifier<ConversationState> {
       // Save to history if enabled in settings
       final settings = _ref.read(settingsProvider);
       if (settings.autoSaveHistory) {
-        _ref.read(historyListProvider.notifier).addHistoryItem(sourceText, translated);
+        _ref.read(historyListProvider.notifier).addHistoryItem(
+              sourceText,
+              translated,
+            );
       }
+    } on TimeoutException catch (e) {
+       _log('[Timeout] $e');
+      state = state.copyWith(
+        translatedText: 'Terjemahan timeout. Silakan coba lagi.',
+      );
     } on TranslationException catch (e) {
+       _log('[Translation API] $e');
       state = state.copyWith(
         translatedText: e.message,
       );
-    } catch (_) {
-      state = state.copyWith(
-        translatedText: 'Terjemahan gagal. Cek koneksi internet.',
-      );
+    } catch (e) {
+      final msg = '$e';
+      if (msg.toLowerCase().contains('socketexception') ||
+          msg.toLowerCase().contains('failed host lookup')) {
+         _log('[Network] $e');
+        state = state.copyWith(
+          translatedText: 'Terjemahan gagal. Periksa koneksi internet.',
+        );
+      } else {
+         _log('[Translation API] unexpected: $e');
+        state = state.copyWith(
+          translatedText: 'Terjemahan gagal. Silakan coba lagi.',
+        );
+      }
     }
 
     stopTranslating();
+  }
+
+  Future<String> _translateWithOfflineFallback(String sourceText) async {
+    final from = state.sourceLanguage.code;
+    final to = state.targetLanguage.code;
+
+    try {
+      return await _translator.translate(
+        text: sourceText,
+        from: from,
+        to: to,
+      );
+    } catch (onlineError) {
+      final offline = await _tryOfflineTranslate(sourceText, from, to);
+      if (offline != null) return offline;
+      rethrow;
+    }
+  }
+
+  Future<String?> _tryOfflineTranslate(
+    String text,
+    String from,
+    String to,
+  ) async {
+    if (!_offlineTranslator.isLanguageSupported(from) ||
+        !_offlineTranslator.isLanguageSupported(to)) {
+      return null;
+    }
+
+    final fromReady = await _offlineTranslator.isModelDownloaded(from);
+    final toReady = await _offlineTranslator.isModelDownloaded(to);
+    if (!fromReady || !toReady) return null;
+
+    return _offlineTranslator.translate(
+      text: text,
+      from: from,
+      to: to,
+    );
   }
 
   void startListening() {
@@ -229,6 +298,7 @@ class ConversationNotifier extends StateNotifier<ConversationState> {
   @override
   void dispose() {
     _translateDebounce?.cancel();
+    _offlineTranslator.dispose();
     super.dispose();
   }
 }

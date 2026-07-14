@@ -267,11 +267,100 @@ class AboutPage extends StatelessWidget {
 
 class PrivacyPolicyPage extends StatelessWidget {
   const PrivacyPolicyPage({super.key});
+
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(title: const Text('Privacy Policy')),
-      body: const Padding(padding: EdgeInsets.all(16), child: Text('Privacy policy content here...')),
+      body: ListView(
+        padding: const EdgeInsets.all(20),
+        children: [
+          Text('IWIP TalkBridge Privacy Policy',
+              style: theme.textTheme.titleLarge
+                  ?.copyWith(fontWeight: FontWeight.bold)),
+          const SizedBox(height: 4),
+          Text('Last updated: July 2026',
+              style: TextStyle(color: Colors.grey[600], fontSize: 13)),
+          const SizedBox(height: 20),
+          _PolicySection(
+            title: '1. Data yang Kami Kumpulkan',
+            content:
+                'IWIP TalkBridge berjalan sepenuhnya di perangkat Anda. Kami tidak mengumpulkan, menyimpan, atau mengirim data pribadi ke server kami.\n\n'
+                '• Riwayat terjemahan disimpan secara lokal di perangkat Anda\n'
+                '• Favorit disimpan secara lokal di perangkat Anda\n'
+                '• Pengaturan profil (nama, email) disimpan secara lokal\n'
+                '• Tidak ada data yang dikirim ke server IWIP',
+          ),
+          _PolicySection(
+            title: '2. Layanan Terjemahan',
+            content:
+                'Untuk terjemahan online, teks yang Anda masukkan dikirim ke layanan pihak ketiga:\n\n'
+                '• Google Translate API (translate.googleapis.com) — untuk terjemahan utama\n'
+                '• MyMemory API (mymemory.translated.net) — sebagai fallback\n\n'
+                'Untuk terjemahan offline, semua proses dilakukan sepenuhnya di perangkat Anda menggunakan Google ML Kit tanpa koneksi internet.',
+          ),
+          _PolicySection(
+            title: '3. Izin Aplikasi',
+            content:
+                '• Mikrofon: Untuk fitur Speech-to-Text\n'
+                '• Kamera & Galeri: Untuk fitur Camera Translate (OCR)\n'
+                '• Internet: Untuk terjemahan online dan download model offline\n'
+                '• Storage: Untuk menyimpan data lokal (riwayat, favorit, pengaturan)',
+          ),
+          _PolicySection(
+            title: '4. Layanan Pihak Ketiga',
+            content:
+                'Aplikasi ini menggunakan layanan Google ML Kit untuk:\n'
+                '• Pengenalan teks (OCR) dari gambar\n'
+                '• Terjemahan offline\n\n'
+                'Data gambar yang diproses untuk OCR tidak meninggalkan perangkat Anda.',
+          ),
+          _PolicySection(
+            title: '5. Keamanan Data',
+            content:
+                'Semua data disimpan secara lokal menggunakan SharedPreferences Android yang aman. '
+                'Kami tidak memiliki akses ke data Anda.',
+          ),
+          _PolicySection(
+            title: '6. Hubungi Kami',
+            content:
+                'Jika Anda memiliki pertanyaan tentang kebijakan privasi ini, hubungi:\n\n'
+                'Email: privacy@iwip.com\n'
+                'Website: https://iwip.com',
+          ),
+        ],
+      ),
     );
   }
 }
+
+class _PolicySection extends StatelessWidget {
+  final String title;
+  final String content;
+
+  const _PolicySection({required this.title, required this.content});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title,
+              style: theme.textTheme.titleSmall
+                  ?.copyWith(fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          Text(content,
+              style: TextStyle(
+                  height: 1.6,
+                  color: theme.textTheme.bodyMedium?.color)),
+          const Divider(height: 32),
+        ],
+      ),
+    );
+  }
+}
+

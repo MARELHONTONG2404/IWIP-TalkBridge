@@ -70,5 +70,9 @@
 	<string>Izin mikrofon diperlukan untuk menerjemahkan percakapan secara real-time.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Izin pengenalan suara diperlukan untuk mengubah ucapan Anda menjadi teks.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Izin kamera diperlukan untuk memindai dan menerjemahkan teks dari gambar.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Izin galeri diperlukan untuk memilih gambar yang ingin diterjemahkan.</string>
 </dict>
 </plist>

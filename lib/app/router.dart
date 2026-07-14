@@ -8,6 +8,7 @@ import '../features/history/presentation/pages/history_page.dart';
 import '../features/settings/presentation/settings_page.dart';
 import '../features/offline/presentation/offline_page.dart';
 import '../features/favorite/presentation/pages/favorite_page.dart';
+import '../features/camera/presentation/camera_translate_page.dart';
 
 final GoRouter appRouter = GoRouter(
   initialLocation: '/',
@@ -44,6 +45,10 @@ final GoRouter appRouter = GoRouter(
     GoRoute(
       path: '/settings',
       builder: (context, state) => const SettingsPage(),
+    ),
+    GoRoute(
+      path: '/camera',
+      builder: (context, state) => const CameraTranslatePage(),
     ),
   ],
 );
