@@ -36,6 +36,8 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
   String _committedText = '';
   String _livePartial = '';
   bool _finalizingSpeech = false;
+  /// Confidence terakhir dari final STT; null = engine tidak memberi rating.
+  double? _lastSpeechConfidence;
 
   bool get _isMobile => !kIsWeb && (Platform.isAndroid || Platform.isIOS);
 
@@ -137,12 +139,17 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
       final notifier = ref.read(conversationProvider.notifier);
 
       if (isFinal) {
-        // Update committed text only — translate waits until speech ends.
+        // Confidence > 0 berarti ada rating; -1 = tidak ada rating.
+        if (confidence > 0) {
+          _lastSpeechConfidence = confidence;
+        }
+        // Committed, tapi tetap draft sampai sesi speech benar-benar selesai.
         _committedText = SpeechTextProcessor.mergeSession(_committedText, text);
         _livePartial = '';
-        notifier.setSpeakerText(_committedText, isDraft: false);
-         _log(
-          '[Speech Recognition] final (${_committedText.length} chars)',
+        notifier.setSpeakerText(_committedText, isDraft: true);
+        _log(
+          '[Speech Recognition] final (${_committedText.length} chars) '
+          'conf=${confidence.toStringAsFixed(2)}',
         );
       } else {
         _livePartial = text;
@@ -181,6 +188,7 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
       _activeLocale = null;
       _committedText = '';
       _livePartial = '';
+      _lastSpeechConfidence = null;
     });
 
     notifier.startListening();
@@ -240,9 +248,24 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
 
     try {
       final notifier = ref.read(conversationProvider.notifier);
-      final finalText = _committedText.trim().isNotEmpty
-          ? _committedText
+
+      // Debounce ~800ms: tunggu final STT settle (Google Translate-like).
+      await Future<void>.delayed(const Duration(milliseconds: 800));
+      if (!mounted) return;
+
+      var finalText = _committedText.trim().isNotEmpty
+          ? _committedText.trim()
           : _livePartial.trim();
+
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      if (!mounted) return;
+
+      final settled = _committedText.trim().isNotEmpty
+          ? _committedText.trim()
+          : _livePartial.trim();
+      if (settled.length >= finalText.length) {
+        finalText = settled;
+      }
 
       notifier.stopListening();
 
@@ -252,19 +275,25 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
       if (finalText.isEmpty ||
           finalText == 'Mendengarkan...' ||
           finalText == ConversationNotifier.speakerPlaceholder) {
-         _log('[Speech Recognition] done with empty text — skip translate');
+        _log('[Speech Recognition] done with empty text — skip translate');
+        return;
+      }
+
+      // Confidence rendah → jangan translate.
+      final conf = _lastSpeechConfidence;
+      if (conf != null && conf > 0 && conf < 0.45) {
+        notifier.setSpeakerText(finalText, isDraft: false);
+        _showMessage('Silakan ulangi ucapan');
+        _log('[Speech Recognition] low confidence=$conf — skip translate');
         return;
       }
 
       notifier.setSpeakerText(finalText, isDraft: false);
-       _log(
+      _log(
         '[Speech Recognition] done (${finalText.length} chars) → translate',
       );
 
-      // Brief settle so final STT result is committed before API call.
-      await Future<void>.delayed(const Duration(milliseconds: 1000));
-      if (!mounted) return;
-
+      // Satu request per kalimat selesai (bukan per kata).
       await notifier.translate(finalText);
 
       if (!mounted) return;
@@ -329,13 +358,31 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
               ),
             ),
             TextButton(
-              onPressed: () {
+              onPressed: () async {
                 final text = controller.text.trim();
                 Navigator.pop(context);
-                if (text.isNotEmpty) {
-                  final notifier = ref.read(conversationProvider.notifier);
-                  notifier.setSpeakerText(text, isDraft: false);
-                  notifier.translate(text);
+                if (text.isEmpty) return;
+
+                final notifier = ref.read(conversationProvider.notifier);
+                notifier.setSpeakerText(text, isDraft: false);
+                await notifier.translate(text);
+                if (!mounted) return;
+
+                final translatedText =
+                    ref.read(conversationProvider).translatedText;
+                final looksLikeError =
+                    translatedText.startsWith('Terjemahan timeout') ||
+                        translatedText.startsWith('Terjemahan gagal') ||
+                        translatedText.startsWith('Limit terjemahan');
+                if (translatedText.isNotEmpty &&
+                    translatedText !=
+                        ConversationNotifier.translationPlaceholder &&
+                    !looksLikeError) {
+                  _ttsService.speak(
+                    translatedText,
+                    languageCode:
+                        ref.read(conversationProvider).targetLanguage.code,
+                  );
                 }
               },
               child: Text(

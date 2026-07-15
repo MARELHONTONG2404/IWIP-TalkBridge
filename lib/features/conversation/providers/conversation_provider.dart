@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/services/offline_translation_service.dart';
 import '../../../../core/services/translation_service.dart';
+import '../../../../core/services/translation_text_processor.dart';
 import '../../language/data/language_model.dart';
 import '../../history/providers/history_provider.dart';
 import '../../settings/providers/settings_provider.dart';
@@ -91,6 +92,7 @@ class ConversationNotifier extends StateNotifier<ConversationState> {
   final OfflineTranslationService _offlineTranslator =
       OfflineTranslationService();
   Timer? _translateDebounce;
+  String? _lastTranslatedSource;
 
   static const speakerPlaceholder = 'Tap mic and start speaking to translate...';
   static const translationPlaceholder = 'Translation will appear here...';
@@ -98,9 +100,12 @@ class ConversationNotifier extends StateNotifier<ConversationState> {
   static const _skipTranslateTexts = {
     'Mendengarkan...',
     'Mulai berbicara...',
+    'Silakan ulangi ucapan',
     speakerPlaceholder,
     translationPlaceholder,
   };
+
+  static const _translateDebounceMs = 800;
 
   void swapLanguage() {
     state = state.copyWith(
@@ -158,27 +163,49 @@ class ConversationNotifier extends StateNotifier<ConversationState> {
 
   void scheduleTranslate(String text) {
     _translateDebounce?.cancel();
-    _translateDebounce = Timer(const Duration(milliseconds: 1000), () {
-      translate(text);
-    });
+    _translateDebounce = Timer(
+      const Duration(milliseconds: _translateDebounceMs),
+      () => translate(text),
+    );
   }
 
   Future<void> translate([String? text]) async {
     _translateDebounce?.cancel();
 
-    final sourceText = (text ?? state.speakerText).trim();
-
-    if (sourceText.isEmpty || _skipTranslateTexts.contains(sourceText)) {
+    final raw = (text ?? state.speakerText).trim();
+    if (raw.isEmpty || _skipTranslateTexts.contains(raw)) {
       return;
     }
 
+    // Validasi: hanya teks bersih/valid (bukan log/error/kosong).
+    // Translate hanya dari input speech/teks user — bukan draft/listening.
     if (state.isListening) {
-       _log('[Speech Recognition] skip translate — still listening');
+      _log('[Speech Recognition] skip translate — still listening');
+      return;
+    }
+
+    final sourceText = TranslationTextProcessor.prepare(
+      raw,
+      state.sourceLanguage.code,
+    );
+    if (sourceText.isEmpty ||
+        !TranslationTextProcessor.isSafeToTranslate(sourceText)) {
+      _log('[Translation API] skip — invalid / unsafe source');
+      return;
+    }
+
+    // Jangan translate ulang teks yang sama.
+    if (sourceText == _lastTranslatedSource &&
+        state.translatedText.isNotEmpty &&
+        state.translatedText != translationPlaceholder &&
+        !state.translatedText.startsWith('Terjemahan')) {
       return;
     }
 
     if (state.sourceLanguage.code == state.targetLanguage.code) {
+      _lastTranslatedSource = sourceText;
       state = state.copyWith(
+        speakerText: sourceText,
         translatedText: sourceText,
         isSpeakerDraft: false,
       );
@@ -186,19 +213,18 @@ class ConversationNotifier extends StateNotifier<ConversationState> {
     }
 
     startTranslating();
-     _log(
-      '[Translation API] start (${sourceText.length} chars)',
-    );
+    _log('[Translation API] start (${sourceText.length} chars)');
 
     try {
       final translated = await _translateWithOfflineFallback(sourceText);
 
+      _lastTranslatedSource = sourceText;
       state = state.copyWith(
+        speakerText: sourceText,
         translatedText: translated,
         isSpeakerDraft: false,
       );
 
-      // Save to history if enabled in settings
       final settings = _ref.read(settingsProvider);
       if (settings.autoSaveHistory) {
         _ref.read(historyListProvider.notifier).addHistoryItem(
@@ -207,12 +233,12 @@ class ConversationNotifier extends StateNotifier<ConversationState> {
             );
       }
     } on TimeoutException catch (e) {
-       _log('[Timeout] $e');
+      _log('[Timeout] $e');
       state = state.copyWith(
         translatedText: 'Terjemahan timeout. Silakan coba lagi.',
       );
     } on TranslationException catch (e) {
-       _log('[Translation API] $e');
+      _log('[Translation API] $e');
       state = state.copyWith(
         translatedText: e.message,
       );
@@ -220,12 +246,12 @@ class ConversationNotifier extends StateNotifier<ConversationState> {
       final msg = '$e';
       if (msg.toLowerCase().contains('socketexception') ||
           msg.toLowerCase().contains('failed host lookup')) {
-         _log('[Network] $e');
+        _log('[Network] $e');
         state = state.copyWith(
           translatedText: 'Terjemahan gagal. Periksa koneksi internet.',
         );
       } else {
-         _log('[Translation API] unexpected: $e');
+        _log('[Translation API] unexpected: $e');
         state = state.copyWith(
           translatedText: 'Terjemahan gagal. Silakan coba lagi.',
         );
@@ -274,6 +300,7 @@ class ConversationNotifier extends StateNotifier<ConversationState> {
   }
 
   void startListening() {
+    _lastTranslatedSource = null;
     state = state.copyWith(
       isListening: true,
       isSpeakerDraft: true,

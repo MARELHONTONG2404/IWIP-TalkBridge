@@ -6,9 +6,15 @@ class SpeechTextProcessor {
 
     SpeechRecognitionWords best = result.alternates.first;
     for (final alternate in result.alternates) {
-      if (alternate.hasConfidenceRating &&
-          best.hasConfidenceRating &&
-          alternate.confidence > best.confidence) {
+      if (alternate.hasConfidenceRating && best.hasConfidenceRating) {
+        // Prioritaskan confidence tertinggi (semirip Google).
+        if (alternate.confidence > best.confidence) {
+          best = alternate;
+        } else if ((alternate.confidence - best.confidence).abs() <= 0.02 &&
+            alternate.recognizedWords.length > best.recognizedWords.length) {
+          best = alternate;
+        }
+      } else if (alternate.hasConfidenceRating && !best.hasConfidenceRating) {
         best = alternate;
       } else if (!best.hasConfidenceRating &&
           alternate.recognizedWords.length > best.recognizedWords.length) {
@@ -34,9 +40,9 @@ class SpeechTextProcessor {
   }
 
   static String _removeGarbage(String text) {
-    // Daftar kata yang sering muncul sebagai hasil salah interpretasi (hallucinations)
+    // Hanya token nonsense yang jelas hallucination — jangan hapus kata umum.
     final garbagePattern = RegExp(
-      r'\b(?:lotpong|pong|long|ding)\b',
+      r'\b(?:lotpong)\b',
       caseSensitive: false,
     );
     return text
@@ -45,13 +51,37 @@ class SpeechTextProcessor {
         .trim();
   }
 
+  /// Gabungkan hasil final STT agar kalimat panjang stabil (hindari duplikasi).
   static String mergeSession(String committed, String incoming) {
     final base = committed.trim();
     final next = incoming.trim();
     if (next.isEmpty) return base;
     if (base.isEmpty) return next;
+    if (base == next) return base;
     if (base.endsWith(next)) return base;
     if (next.startsWith(base)) return next;
+    if (base.startsWith(next)) return base;
+
+    final baseLower = base.toLowerCase();
+    final nextLower = next.toLowerCase();
+    if (nextLower.contains(baseLower)) return next;
+    if (baseLower.contains(nextLower)) return base;
+
+    final baseWords = base.split(RegExp(r'\s+'));
+    final nextWords = next.split(RegExp(r'\s+'));
+    final maxOverlap = baseWords.length < nextWords.length
+        ? baseWords.length
+        : nextWords.length;
+
+    for (var n = maxOverlap; n >= 1; n--) {
+      final baseTail =
+          baseWords.sublist(baseWords.length - n).join(' ').toLowerCase();
+      final nextHead = nextWords.sublist(0, n).join(' ').toLowerCase();
+      if (baseTail == nextHead) {
+        final rest = nextWords.sublist(n).join(' ');
+        return rest.isEmpty ? base : '$base $rest';
+      }
+    }
 
     final needsSpace =
         !base.endsWith('.') &&
@@ -75,8 +105,42 @@ class SpeechTextProcessor {
   }
 
   static String _applyLanguageFixes(String text, String languageCode) {
+    var fixed = text;
+
+    // Hanya frasa nama lengkap (aman untuk bicara topik lain).
+    final domainFixes = <Pattern, String>{
+      RegExp(
+        r'\b(?:i\s*w\s*i\s*p|ewip|iwiip|iwhip)\b',
+        caseSensitive: false,
+      ): 'IWIP',
+      RegExp(
+        r'\bindonesia\s+(?:weda|widiay|widaya|wida)\s+bay\s+industrial\s+park\b',
+        caseSensitive: false,
+      ): 'Indonesia Weda Bay Industrial Park',
+      RegExp(
+        r'\b(?:p\.?\s*t\.?|pt|pity|peti|pee\s*tee)\s+'
+        r'(?:weda|widiay|widaya|widiy?a?|widay|weday|veda|weeda|wida)\s+'
+        r'(?:bay|bali|bye|bei|bai)\s+'
+        r'(?:nickel|nikel|nikl|nickle)\b',
+        caseSensitive: false,
+      ): 'PT Weda Bay Nickel',
+      RegExp(
+        r'\b(?:weda|widiay|widaya|widiy?a?|widay|weday|veda|weeda|wida)\s+'
+        r'(?:bay|bali|bye|bei|bai)\s+'
+        r'(?:nickel|nikel|nikl|nickle)\b',
+        caseSensitive: false,
+      ): 'Weda Bay Nickel',
+      RegExp(
+        r'\b(?:halma\s*hera|halmahaera)\b',
+        caseSensitive: false,
+      ): 'Halmahera',
+    };
+
+    for (final entry in domainFixes.entries) {
+      fixed = fixed.replaceAll(entry.key, entry.value);
+    }
+
     if (languageCode == 'id') {
-      var fixed = text;
       final replacements = <Pattern, String>{
         RegExp(
           r'\b(?:slam|salam|cell?a?mat?|selamat?|some\s+a)\s+(?:pagi|party|parquet|buggy|morning)\b',
@@ -105,7 +169,6 @@ class SpeechTextProcessor {
         RegExp(r'\bbagaimana\b', caseSensitive: false): 'bagaimana',
         RegExp(r'\btidak\b', caseSensitive: false): 'tidak',
         RegExp(r'\bbisa\b', caseSensitive: false): 'bisa',
-        // Koreksi fonetik nama yang sering salah didengar oleh speech engine.
         RegExp(
           r'\bmarel\s+(?:lontong|lantong|luntung|hontong)\b',
           caseSensitive: false,
@@ -117,11 +180,11 @@ class SpeechTextProcessor {
       return fixed;
     }
 
-    if (languageCode == 'en') {
-      return text[0].toUpperCase() + text.substring(1);
+    if (languageCode == 'en' && fixed.isNotEmpty) {
+      return fixed[0].toUpperCase() + fixed.substring(1);
     }
 
-    return text;
+    return fixed;
   }
 
   static String _capitalizeSentences(String text, String languageCode) {

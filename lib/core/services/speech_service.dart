@@ -268,7 +268,9 @@ class SpeechService {
     _languageCode = languageCode;
     _onResult = onResult;
     _onSoundLevel = onSoundLevel;
-    _localeFallbackChain = await buildLocaleFallbackChain(localeId);
+    // Paksa locale baku: id-ID / en-US / zh-CN.
+    final preferredLocale = _canonicalLocale(languageCode, localeId);
+    _localeFallbackChain = await buildLocaleFallbackChain(preferredLocale);
     _localeFallbackIndex = 0;
     _isRetryingLocale = false;
 
@@ -277,7 +279,7 @@ class SpeechService {
       return false;
     }
 
-    final preferredKey = _languageKey(localeId);
+    final preferredKey = _languageKey(preferredLocale);
     if (!_chainHasPreferredLanguage(_localeFallbackChain, preferredKey) &&
         !_localeFallbackChain.contains(_autoLocaleToken)) {
       _lastError = _languagePackInstructions(languageCode);
@@ -288,6 +290,19 @@ class SpeechService {
     await _listenWithLocale(_localeFallbackChain.first);
 
     return _speech.isListening;
+  }
+
+  String _canonicalLocale(String languageCode, String localeId) {
+    switch (languageCode) {
+      case 'id':
+        return 'id-ID';
+      case 'en':
+        return 'en-US';
+      case 'zh':
+        return 'zh-CN';
+      default:
+        return localeId;
+    }
   }
 
   String? _resolveActiveLocaleLabel(String localeToken) {
@@ -321,11 +336,12 @@ class SpeechService {
           _onSoundLevel?.call(level);
         },
         listenOptions: SpeechListenOptions(
+          // Partial hanya untuk preview UI — translate menunggu final (mirip Google Translate).
           partialResults: true,
           listenMode: ListenMode.dictation,
           localeId: _listenLocaleId(localeToken),
-          listenFor: const Duration(seconds: 60),
-          pauseFor: const Duration(seconds: 4),
+          listenFor: const Duration(seconds: 120),
+          pauseFor: const Duration(seconds: 3),
           cancelOnError: false,
           onDevice: false,
           autoPunctuation: true,
@@ -357,11 +373,11 @@ class SpeechService {
     if (processed.isEmpty) return;
 
     final confidence = result.confidence;
+    final hasRating = result.hasConfidenceRating;
 
-    // Be more permissive with confidence for partial results to ensure responsiveness
+    // Partial: toleran. Final berkepuasan rendah tetap dikirim; UI tolak translate.
     if (!result.finalResult) {
-      final hasRating = result.hasConfidenceRating;
-      if (hasRating && confidence < 0.05) {
+      if (hasRating && confidence > 0 && confidence < 0.05) {
         return;
       }
     }
@@ -369,15 +385,17 @@ class SpeechService {
     onResult(
       processed,
       isFinal: result.finalResult,
-      confidence: confidence,
+      confidence: hasRating ? confidence : -1,
     );
   }
 
   Future<void> stopListening() async {
-    _onResult = null;
     _onSoundLevel = null;
     _localeFallbackChain = [];
+    // Jangan clear _onResult sebelum stop — final STT sering datang setelah stop().
     await _speech.stop();
+    await Future<void>.delayed(const Duration(milliseconds: 450));
+    _onResult = null;
   }
 
   Future<void> cancelListening() async {

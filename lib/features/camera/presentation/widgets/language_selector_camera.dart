@@ -2,9 +2,20 @@ import 'package:flutter/material.dart';
 
 import '../../../language/data/language_model.dart';
 
+/// Auto-detect bahasa sumber (Camera Translate saja).
+const _autoDetectLang = LanguageModel(
+  name: 'Auto Detect',
+  nativeName: 'Auto Detect',
+  flag: '🌐',
+  code: 'auto',
+  speechCode: 'auto',
+);
+
 /// A compact language selector used in the Camera Translate page.
 /// Reuses the same bottom-sheet picker pattern as LanguageSelector.
 class LanguageSelectorCamera extends StatelessWidget {
+  static const autoDetect = _autoDetectLang;
+
   final LanguageModel sourceLang;
   final LanguageModel targetLang;
   final ValueChanged<LanguageModel> onSourceChanged;
@@ -24,6 +35,7 @@ class LanguageSelectorCamera extends StatelessWidget {
     BuildContext context, {
     required LanguageModel selected,
     required ValueChanged<LanguageModel> onSelected,
+    required List<LanguageModel> options,
   }) async {
     final picked = await showModalBottomSheet<LanguageModel>(
       context: context,
@@ -59,11 +71,11 @@ class LanguageSelectorCamera extends StatelessWidget {
                 Expanded(
                   child: ListView.separated(
                     controller: scrollController,
-                    itemCount: languages.length,
+                    itemCount: options.length,
                     separatorBuilder: (_, _) =>
                         Divider(height: 1, color: Colors.grey.shade200),
                     itemBuilder: (context, index) {
-                      final language = languages[index];
+                      final language = options[index];
                       final isSelected = language.code == selected.code;
                       return ListTile(
                         leading: Text(
@@ -106,6 +118,7 @@ class LanguageSelectorCamera extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
+    final sourceOptions = <LanguageModel>[_autoDetectLang, ...languages];
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
@@ -122,6 +135,7 @@ class LanguageSelectorCamera extends StatelessWidget {
                 context,
                 selected: sourceLang,
                 onSelected: onSourceChanged,
+                options: sourceOptions,
               ),
             ),
           ),
@@ -141,6 +155,7 @@ class LanguageSelectorCamera extends StatelessWidget {
                 context,
                 selected: targetLang,
                 onSelected: onTargetChanged,
+                options: languages,
               ),
             ),
           ),

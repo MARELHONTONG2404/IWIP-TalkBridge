@@ -1,12 +1,56 @@
 class TranslationTextProcessor {
+  static const _unsafeMarkers = [
+    'camerax',
+    'camera2',
+    'androidx.camera',
+    'stacktrace',
+    'stack trace',
+    'fatal exception',
+    'flutter.',
+    'exception:',
+    'error_network',
+    'socketexception',
+  ];
+
   static String prepare(String raw, String languageCode) {
-    var text = raw.trim().replaceAll(RegExp(r'\s+'), ' ');
+    var text = raw.trim();
     if (text.isEmpty) return '';
+
+    text = _stripControlChars(text);
+    text = text.replaceAll(RegExp(r'[^\S\n]+'), ' ');
+    text = text.replaceAll(RegExp(r'\n{2,}'), '\n').trim();
+    if (text.isEmpty) return '';
+
+    if (_looksUnsafe(text)) return '';
 
     text = _normalizePunctuation(text);
     text = _applyLanguageNormalizations(text, languageCode);
 
     return text.trim();
+  }
+
+  static bool isSafeToTranslate(String raw) {
+    final text = _stripControlChars(raw.trim());
+    if (text.isEmpty) return false;
+    return !_looksUnsafe(text);
+  }
+
+  static String _stripControlChars(String text) {
+    return text.replaceAll(RegExp(r'[\x00-\x08\x0B\x0C\x0E-\x1F]'), '');
+  }
+
+  static bool _looksUnsafe(String text) {
+    final lower = text.toLowerCase();
+    for (final m in _unsafeMarkers) {
+      if (lower.contains(m)) return true;
+    }
+    final lines = text.split('\n');
+    if (lines.length >= 3) {
+      final logLike =
+          lines.where((l) => RegExp(r'^[VDIWEF]/').hasMatch(l.trim())).length;
+      if (logLike >= 2) return true;
+    }
+    return false;
   }
 
   static String _normalizePunctuation(String text) {
