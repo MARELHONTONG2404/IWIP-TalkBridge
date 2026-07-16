@@ -25,17 +25,14 @@ void main() {
       );
     });
 
-    test('leaves unrelated speech unchanged', () {
+    test('corrects IWIP site glossary terms', () {
       expect(
-        SpeechTextProcessor.postProcess(
-          'saya mau pergi ke bali dan beli nickel baterai',
-          'id',
-        ),
-        'Saya mau pergi ke bali dan beli nickel baterai',
+        SpeechTextProcessor.postProcess('rapat hse di iwip', 'id'),
+        'Rapat HSE di IWIP',
       );
       expect(
-        SpeechTextProcessor.postProcess('how long will it take', 'en'),
-        'How long will it take',
+        SpeechTextProcessor.postProcess('wajib pakai ppe', 'id'),
+        'Wajib pakai PPE',
       );
     });
   });

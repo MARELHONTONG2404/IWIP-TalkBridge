@@ -1,7 +1,10 @@
+import 'dart:io' show Platform;
+
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:speech_to_text/speech_recognition_result.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 
+import 'mic_permission_service.dart';
 import 'speech_text_processor.dart';
 
 typedef SpeechErrorCallback = void Function(String message);
@@ -31,6 +34,7 @@ class SpeechService {
   List<String> _localeFallbackChain = [];
   int _localeFallbackIndex = 0;
   bool _isRetryingLocale = false;
+  bool _manualControl = false;
 
   bool get isListening => _speech.isListening;
 
@@ -247,49 +251,160 @@ class SpeechService {
     return _chainHasPreferredLanguage(chain, _languageKey(preferredLocale));
   }
 
+  /// Tunggu engine STT benar-benar aktif (hindari false-negative langsung setelah listen).
+  Future<bool> _waitUntilListening({int attempts = 8}) async {
+    for (var i = 0; i < attempts; i++) {
+      if (_speech.isListening) return true;
+      await Future<void>.delayed(const Duration(milliseconds: 120));
+    }
+    return _speech.isListening;
+  }
+
   Future<bool> startListening({
     required String localeId,
     required String languageCode,
     required SpeechResultCallback onResult,
     SpeechSoundLevelCallback? onSoundLevel,
+    /// Auto-detect: jangan kunci ke bahasa picker user (mirip Google Translate).
+    bool autoDetectLanguage = false,
+    /// Manual mic: jangan auto-stop karena jeda singkat.
+    bool manualControl = false,
   }) async {
     if (!_isAvailable) {
-      _lastError = 'Speech recognition tidak tersedia';
+      if (!kIsWeb && Platform.isAndroid) {
+        _lastError =
+            'Speech recognition tidak tersedia. Pastikan Google app terpasang, '
+            'internet aktif, dan Speech Services by Google sudah di-update.';
+      } else {
+        _lastError = 'Speech recognition tidak tersedia';
+      }
       return false;
     }
 
-    final hasMicPermission = await _speech.hasPermission;
-    if (!hasMicPermission) {
-      _lastError =
-          'Izin mikrofon belum diberikan. Tap mic lagi dan pilih Allow';
+    final permission = await MicPermissionService.ensureGranted();
+    if (!permission.granted) {
+      _lastError = permission.message ??
+          'Izin mikrofon diperlukan untuk merekam suara';
       return false;
     }
 
-    _languageCode = languageCode;
+    final hadPermission = await _speech.hasPermission;
+
+    _languageCode = autoDetectLanguage ? 'auto' : languageCode;
     _onResult = onResult;
     _onSoundLevel = onSoundLevel;
-    // Paksa locale baku: id-ID / en-US / zh-CN.
-    final preferredLocale = _canonicalLocale(languageCode, localeId);
-    _localeFallbackChain = await buildLocaleFallbackChain(preferredLocale);
+    _manualControl = manualControl;
+
+    if (autoDetectLanguage) {
+      _localeFallbackChain = await _buildAutoDetectLocaleChain();
+    } else {
+      // Paksa locale baku: id-ID / en-US / zh-CN.
+      final preferredLocale = _canonicalLocale(languageCode, localeId);
+      _localeFallbackChain = await buildLocaleFallbackChain(preferredLocale);
+    }
     _localeFallbackIndex = 0;
     _isRetryingLocale = false;
 
     if (_localeFallbackChain.isEmpty) {
-      _lastError = _languagePackInstructions(languageCode);
+      _lastError = _languagePackInstructions(
+        autoDetectLanguage ? 'id' : languageCode,
+      );
       return false;
     }
 
-    final preferredKey = _languageKey(preferredLocale);
-    if (!_chainHasPreferredLanguage(_localeFallbackChain, preferredKey) &&
-        !_localeFallbackChain.contains(_autoLocaleToken)) {
-      _lastError = _languagePackInstructions(languageCode);
-      return false;
+    if (!autoDetectLanguage) {
+      final preferredKey = _languageKey(
+        _canonicalLocale(languageCode, localeId),
+      );
+      if (!_chainHasPreferredLanguage(_localeFallbackChain, preferredKey) &&
+          !_localeFallbackChain.contains(_autoLocaleToken)) {
+        _lastError = _languagePackInstructions(languageCode);
+        return false;
+      }
     }
 
     _activeLocale = _resolveActiveLocaleLabel(_localeFallbackChain.first);
-    await _listenWithLocale(_localeFallbackChain.first);
 
-    return _speech.isListening;
+    // Coba tiap locale sampai mic benar-benar menyala (umum di HP Android).
+    for (var i = 0; i < _localeFallbackChain.length; i++) {
+      _localeFallbackIndex = i;
+      final token = _localeFallbackChain[i];
+      _activeLocale = _resolveActiveLocaleLabel(token);
+      await _listenWithLocale(token);
+
+      final listening = await _waitUntilListening(attempts: 12);
+      if (listening) return true;
+    }
+
+    final hasPermissionNow = await _speech.hasPermission;
+    if (!hadPermission && !hasPermissionNow) {
+      _lastError =
+          'Izin mikrofon ditolak. Aktifkan di Settings → Apps → ilb → Permissions → Microphone';
+      return false;
+    }
+    if (!hasPermissionNow) {
+      _lastError =
+          'Izin mikrofon belum diberikan. Tap Dengarkan lagi dan pilih Allow';
+      return false;
+    }
+
+    _lastError ??= _languagePackInstructions(
+      autoDetectLanguage ? 'id' : languageCode,
+    );
+    return false;
+  }
+
+  /// Lanjutkan sesi manual setelah engine berhenti sendiri (bukan Stop user).
+  Future<bool> continueManualListening() async {
+    if (!_isAvailable || _onResult == null) return false;
+    if (_speech.isListening) return true;
+    if (_localeFallbackChain.isEmpty) return false;
+    final token = _localeFallbackChain[
+        _localeFallbackIndex.clamp(0, _localeFallbackChain.length - 1)];
+    await _listenWithLocale(token);
+    return _waitUntilListening();
+  }
+
+  Future<List<String>> _buildAutoDetectLocaleChain() async {
+    final locales = await _speech.locales();
+    final chain = <String>[];
+    final seen = <String>{};
+
+    void add(String? localeId) {
+      if (localeId == null || localeId.isEmpty || seen.contains(localeId)) {
+        return;
+      }
+      seen.add(localeId);
+      chain.add(localeId);
+    }
+
+    void addPreferredLocales() {
+      for (final preferred in ['id-ID', 'en-US', 'zh-CN']) {
+        for (final locale in locales) {
+          if (_normalizeLocale(locale.localeId) ==
+              _normalizeLocale(preferred)) {
+            add(locale.localeId);
+          }
+        }
+        for (final locale in locales) {
+          if (_languageKey(locale.localeId) == _languageKey(preferred)) {
+            add(locale.localeId);
+          }
+        }
+        add(preferred);
+        add(preferred.replaceAll('-', '_'));
+      }
+    }
+
+    // HP Android sering gagal jika locale null (online auto) dipakai pertama.
+    if (!kIsWeb && Platform.isAndroid) {
+      addPreferredLocales();
+      add(_autoLocaleToken);
+    } else {
+      add(_autoLocaleToken);
+      addPreferredLocales();
+    }
+    return chain;
   }
 
   String _canonicalLocale(String languageCode, String localeId) {
@@ -340,8 +455,13 @@ class SpeechService {
           partialResults: true,
           listenMode: ListenMode.dictation,
           localeId: _listenLocaleId(localeToken),
-          listenFor: const Duration(seconds: 120),
-          pauseFor: const Duration(seconds: 3),
+          listenFor: _manualControl
+              ? const Duration(minutes: 30)
+              : const Duration(seconds: 120),
+          // Manual: jangan auto-stop karena jeda singkat saat masih sesi mic.
+          pauseFor: _manualControl
+              ? const Duration(minutes: 5)
+              : const Duration(seconds: 3),
           cancelOnError: false,
           onDevice: false,
           autoPunctuation: true,
@@ -349,7 +469,7 @@ class SpeechService {
         ),
       );
     } catch (e) {
-      // Ignore errors during speech listening initiation
+      _lastError = 'Gagal memulai mikrofon: $e';
     }
 
     if (_isRetryingLocale && _speech.isListening) {
@@ -390,6 +510,7 @@ class SpeechService {
   }
 
   Future<void> stopListening() async {
+    _manualControl = false;
     _onSoundLevel = null;
     _localeFallbackChain = [];
     // Jangan clear _onResult sebelum stop — final STT sering datang setelah stop().

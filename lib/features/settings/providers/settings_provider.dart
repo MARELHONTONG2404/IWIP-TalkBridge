@@ -67,9 +67,10 @@ class SettingsNotifier extends StateNotifier<SettingsState> {
 
   SettingsNotifier(this._prefs) : super(SettingsState(
     darkMode: _prefs.getBool('darkMode') ?? false,
-    appLanguage: _prefs.getString('appLanguage') ?? 'English',
-    defaultSourceLang: _prefs.getString('defaultSourceLang') ?? 'English',
-    defaultTargetLang: _prefs.getString('defaultTargetLang') ?? 'Indonesian',
+    // Default UI & pasangan bahasa untuk site IWIP (banyak pekerja China).
+    appLanguage: _prefs.getString('appLanguage') ?? 'Indonesia',
+    defaultSourceLang: _prefs.getString('defaultSourceLang') ?? 'Indonesia',
+    defaultTargetLang: _prefs.getString('defaultTargetLang') ?? '中文',
     speechSpeed: _prefs.getString('speechSpeed') ?? 'Normal',
     voiceGender: _prefs.getString('voiceGender') ?? 'Female',
     autoPlayTranslation: _prefs.getBool('autoPlayTranslation') ?? true,

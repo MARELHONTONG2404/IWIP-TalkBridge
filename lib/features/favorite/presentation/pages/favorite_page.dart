@@ -28,6 +28,17 @@ class _FavoritePageState extends ConsumerState<FavoritePage> {
       appBar: AppBar(
         title: const Text('Favorites'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.health_and_safety_outlined),
+            tooltip: 'Muat frasa HSE IWIP',
+            onPressed: () async {
+              await notifier.ensureHsePhrases();
+              if (!context.mounted) return;
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Frasa HSE IWIP siap dipakai')),
+              );
+            },
+          ),
           if (favorites.isNotEmpty)
             IconButton(
               icon: const Icon(Icons.delete_sweep_rounded),
@@ -116,13 +127,18 @@ class _FavoritePageState extends ConsumerState<FavoritePage> {
                               tooltip: 'Speak translation',
                               onPressed: () {
                                 String code = 'en';
-                                if (item.targetLang.toLowerCase().contains('indo')) {
+                                final t = item.targetLang.toLowerCase();
+                                if (t.contains('indo') || t == 'id') {
                                   code = 'id';
-                                } else if (item.targetLang.toLowerCase().contains('chin') || item.targetLang.contains('中文')) {
+                                } else if (t.contains('chin') ||
+                                    t == 'zh' ||
+                                    item.targetLang.contains('中文')) {
                                   code = 'zh';
-                                } else if (item.targetLang.toLowerCase().contains('jap') || item.targetLang.contains('日本語')) {
+                                } else if (t.contains('jap') ||
+                                    item.targetLang.contains('日本語')) {
                                   code = 'ja';
-                                } else if (item.targetLang.toLowerCase().contains('kor') || item.targetLang.contains('한국어')) {
+                                } else if (t.contains('kor') ||
+                                    item.targetLang.contains('한국어')) {
                                   code = 'ko';
                                 }
                                 _ttsService.speak(item.translatedText, languageCode: code);
@@ -146,16 +162,32 @@ class _FavoritePageState extends ConsumerState<FavoritePage> {
 
   Widget _buildEmptyState() {
     return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.star_border_rounded, size: 80, color: Colors.grey[300]),
-          const SizedBox(height: 16),
-          Text(
-            'No favorites yet',
-            style: TextStyle(fontSize: 18, color: Colors.grey[600]),
-          ),
-        ],
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.star_border_rounded, size: 80, color: Colors.grey[300]),
+            const SizedBox(height: 16),
+            Text(
+              'Belum ada favorit',
+              style: TextStyle(fontSize: 18, color: Colors.grey[600]),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Muat frasa HSE siap pakai (Indonesia ↔ 中文)',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 14, color: Colors.grey[500]),
+            ),
+            const SizedBox(height: 20),
+            FilledButton.icon(
+              onPressed: () =>
+                  ref.read(favoriteProvider.notifier).ensureHsePhrases(),
+              icon: const Icon(Icons.health_and_safety_outlined),
+              label: const Text('Muat frasa HSE IWIP'),
+            ),
+          ],
+        ),
       ),
     );
   }

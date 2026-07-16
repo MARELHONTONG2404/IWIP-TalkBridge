@@ -107,7 +107,7 @@ class SpeechTextProcessor {
   static String _applyLanguageFixes(String text, String languageCode) {
     var fixed = text;
 
-    // Hanya frasa nama lengkap (aman untuk bicara topik lain).
+    // Glosarium site IWIP / PT Weda Bay Nickel (nama & istilah jangan diacak STT).
     final domainFixes = <Pattern, String>{
       RegExp(
         r'\b(?:i\s*w\s*i\s*p|ewip|iwiip|iwhip)\b',
@@ -134,6 +134,19 @@ class SpeechTextProcessor {
         r'\b(?:halma\s*hera|halmahaera)\b',
         caseSensitive: false,
       ): 'Halmahera',
+      RegExp(r'\b(?:h\s*s\s*e|hse)\b', caseSensitive: false): 'HSE',
+      RegExp(r'\b(?:p\s*p\s*e|ppe)\b', caseSensitive: false): 'PPE',
+      RegExp(r'\b(?:apd)\b', caseSensitive: false): 'APD',
+      RegExp(
+        r'\b(?:titik\s+kumpul|titik\s+kumpulan|muster\s+point)\b',
+        caseSensitive: false,
+      ): 'titik kumpul',
+      RegExp(
+        r'\b(?:alat\s+pelindung\s+diri)\b',
+        caseSensitive: false,
+      ): 'alat pelindung diri',
+      RegExp(r'\b(?:smelter|smelder|smeltar)\b', caseSensitive: false): 'smelter',
+      RegExp(r'\b(?:nikel|nickle)\b', caseSensitive: false): 'nikel',
     };
 
     for (final entry in domainFixes.entries) {

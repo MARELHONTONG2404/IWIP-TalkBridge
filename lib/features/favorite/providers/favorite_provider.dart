@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../../core/data/iwip_hse_phrases.dart';
 import '../../settings/providers/settings_provider.dart';
 
 class FavoriteItem {
@@ -42,6 +43,7 @@ class FavoriteItem {
 class FavoriteNotifier extends StateNotifier<List<FavoriteItem>> {
   final SharedPreferences _prefs;
   static const String _key = 'translation_favorites';
+  static const String _seedKey = 'iwip_hse_phrases_seeded_v1';
 
   FavoriteNotifier(this._prefs) : super([]) {
     _loadFavorites();
@@ -49,9 +51,57 @@ class FavoriteNotifier extends StateNotifier<List<FavoriteItem>> {
 
   void _loadFavorites() {
     final list = _prefs.getStringList(_key);
-    if (list != null) {
+    if (list != null && list.isNotEmpty) {
       state = list.map((item) => FavoriteItem.fromJson(jsonDecode(item))).toList();
+      return;
     }
+    // First install / empty: seed frasa HSE IWIP sekali saja.
+    if (_prefs.getBool(_seedKey) != true) {
+      _seedHsePhrasesSync();
+    }
+  }
+
+  void _seedHsePhrasesSync() {
+    final seeded = kIwipHsePhrases
+        .map(
+          (p) => FavoriteItem(
+            id: p.id,
+            sourceLang: 'id',
+            targetLang: 'zh',
+            originalText: p.idText,
+            translatedText: p.zhText,
+            timestamp: DateTime.now(),
+          ),
+        )
+        .toList();
+    state = seeded;
+    _prefs.setBool(_seedKey, true);
+    // Fire-and-forget persist; load path is sync constructor.
+    // ignore: discarded_futures
+    _saveToPrefs();
+  }
+
+  /// Muat ulang frasa HSE tanpa menghapus favorit user yang sudah ada.
+  Future<void> ensureHsePhrases() async {
+    final existing = state.map((e) => e.originalText.trim().toLowerCase()).toSet();
+    final toAdd = <FavoriteItem>[];
+    for (final p in kIwipHsePhrases) {
+      if (existing.contains(p.idText.trim().toLowerCase())) continue;
+      toAdd.add(
+        FavoriteItem(
+          id: '${p.id}_${DateTime.now().millisecondsSinceEpoch}',
+          sourceLang: 'id',
+          targetLang: 'zh',
+          originalText: p.idText,
+          translatedText: p.zhText,
+          timestamp: DateTime.now(),
+        ),
+      );
+    }
+    if (toAdd.isEmpty) return;
+    state = [...toAdd, ...state];
+    await _prefs.setBool(_seedKey, true);
+    await _saveToPrefs();
   }
 
   Future<void> addFavorite({

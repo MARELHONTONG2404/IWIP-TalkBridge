@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import 'translation_text_processor.dart';
+import 'language_detector.dart';
 
 void _log(String message) {
   if (kDebugMode) debugPrint(message);
@@ -52,6 +53,61 @@ class TranslationService {
   String _googleCode(String code) => _googleCodes[code] ?? code;
 
   String _myMemoryCode(String code) => _myMemoryCodes[code] ?? code;
+
+  /// Deteksi bahasa sumber (lokal dulu, lalu Google `sl=auto`).
+  /// Hasil: kode singkat `id` / `en` / `zh` / …
+  Future<String> detectLanguage(String text) async {
+    final input = text.trim();
+    if (input.isEmpty) return 'en';
+
+    final local = LanguageDetector.detectLocal(input);
+    if (local != null) return local;
+
+    try {
+      final detected = await _detectGoogle(input);
+      if (detected != null && detected.isNotEmpty) {
+        return _normalizeDetectedCode(detected);
+      }
+    } catch (e) {
+      _log('[Detect Language] $e');
+    }
+
+    return 'en';
+  }
+
+  String _normalizeDetectedCode(String raw) {
+    final lower = raw.toLowerCase().trim();
+    if (lower.startsWith('zh') || lower == 'cmn') return 'zh';
+    if (lower == 'in') return 'id';
+    if (lower.contains('-')) return lower.split('-').first;
+    return lower;
+  }
+
+  Future<String?> _detectGoogle(String text) async {
+    final sample =
+        text.length > 180 ? text.substring(0, 180) : text;
+    final uri = Uri.parse(_googleUrl).replace(
+      queryParameters: {
+        'client': 'gtx',
+        'sl': 'auto',
+        'tl': 'en',
+        'dt': 't',
+        'ie': 'UTF-8',
+        'oe': 'UTF-8',
+        'q': sample,
+      },
+    );
+    final response =
+        await http.get(uri, headers: _requestHeaders).timeout(_requestTimeout);
+    if (response.statusCode != 200) return null;
+
+    final data = jsonDecode(response.body);
+    // Format gtx: index 2 sering berisi kode bahasa terdeteksi.
+    if (data is List && data.length > 2 && data[2] is String) {
+      return data[2] as String;
+    }
+    return null;
+  }
 
   Future<String> translate({
     required String text,
