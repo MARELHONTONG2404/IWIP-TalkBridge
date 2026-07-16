@@ -106,35 +106,60 @@ class HomePage extends ConsumerWidget {
                   ),
                   const SizedBox(height: 20),
 
-                  // Minimalist Input Box (Core Feature)
-                  InkWell(
-                    onTap: () => context.push('/translate'),
-                    child: Container(
-                      padding: const EdgeInsets.all(20),
-                      decoration: BoxDecoration(
-                        color: theme.cardColor,
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: theme.dividerColor),
-                      ),
-                      child: Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.all(8),
-                            decoration: BoxDecoration(
-                              color: theme.colorScheme.primary.withValues(alpha: 0.1),
-                              shape: BoxShape.circle,
+                  // Kartu utama — tap untuk buka terjemahan
+                  Material(
+                    color: theme.cardColor,
+                    borderRadius: BorderRadius.circular(20),
+                    child: InkWell(
+                      onTap: () => context.push('/translate'),
+                      borderRadius: BorderRadius.circular(20),
+                      child: Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 18,
+                        ),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: theme.dividerColor),
+                        ),
+                        child: Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color: theme.colorScheme.primary
+                                    .withValues(alpha: 0.1),
+                                shape: BoxShape.circle,
+                              ),
+                              child: Icon(
+                                Icons.mic_rounded,
+                                color: theme.colorScheme.primary,
+                                size: 24,
+                              ),
                             ),
-                            child: Icon(Icons.mic_none, color: theme.colorScheme.primary, size: 28),
-                          ),
-                          const SizedBox(width: 15),
-                          Text(
-                            tapToSpeak,
-                            style: TextStyle(
-                              fontSize: 16,
-                              color: theme.textTheme.bodyMedium?.color,
+                            const SizedBox(width: 14),
+                            Expanded(
+                              child: Text(
+                                tapToSpeak,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 15,
+                                  height: 1.3,
+                                  fontWeight: FontWeight.w500,
+                                  color: theme.textTheme.bodyMedium?.color,
+                                ),
+                              ),
                             ),
-                          ),
-                        ],
+                            const SizedBox(width: 8),
+                            Icon(
+                              Icons.arrow_forward_ios_rounded,
+                              size: 14,
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),

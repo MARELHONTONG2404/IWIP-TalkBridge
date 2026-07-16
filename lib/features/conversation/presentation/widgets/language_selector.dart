@@ -101,59 +101,118 @@ class TargetLanguageSelector extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+    return Row(
       children: [
-        Row(
-          children: [
-            Expanded(
-              child: _AutoDetectChip(
-                detectedSource: detectedSource,
-                colors: colors,
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10),
-              child: Icon(
-                Icons.arrow_forward_rounded,
-                color: colors.onSurfaceVariant,
-                size: 28,
-              ),
-            ),
-            Expanded(
-              child: _TargetChip(
-                language: targetLanguage,
-                onTap: () => _openPicker(context),
-                colors: colors,
-              ),
-            ),
-          ],
+        Expanded(
+          child: _LangPill(
+            label: 'Auto',
+            value: detectedSource.nativeName,
+            muted: true,
+            colors: colors,
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          child: Icon(
+            Icons.arrow_forward_rounded,
+            size: 18,
+            color: colors.onSurfaceVariant.withValues(alpha: 0.6),
+          ),
+        ),
+        Expanded(
+          child: _LangPill(
+            label: 'Ke',
+            value: targetLanguage.nativeName,
+            onTap: () => _openPicker(context),
+            colors: colors,
+          ),
         ),
         if (onTwoWayChanged != null) ...[
-          const SizedBox(height: 12),
-          Material(
-            color: colors.surfaceContainerHighest.withValues(alpha: 0.5),
-            borderRadius: BorderRadius.circular(14),
-            child: SwitchListTile(
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
-              dense: true,
-              title: const Text(
-                'Mode dua arah',
-                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-              ),
-              subtitle: Text(
-                twoWayMode
-                    ? 'Otomatis terjemahkan id ↔ ${targetLanguage.nativeName}'
-                    : 'Selalu terjemahkan ke ${targetLanguage.nativeName}',
-                style: TextStyle(fontSize: 12, color: colors.onSurfaceVariant),
-              ),
-              value: twoWayMode,
-              onChanged: onTwoWayChanged,
+          const SizedBox(width: 6),
+          IconButton(
+            tooltip: twoWayMode ? 'Mode dua arah aktif' : 'Mode satu arah',
+            visualDensity: VisualDensity.compact,
+            onPressed: () => onTwoWayChanged!(!twoWayMode),
+            icon: Icon(
+              Icons.swap_horiz_rounded,
+              size: 22,
+              color: twoWayMode ? colors.primary : colors.onSurfaceVariant,
             ),
           ),
         ],
       ],
+    );
+  }
+}
+
+class _LangPill extends StatelessWidget {
+  final String label;
+  final String value;
+  final bool muted;
+  final ColorScheme colors;
+  final VoidCallback? onTap;
+
+  const _LangPill({
+    required this.label,
+    required this.value,
+    required this.colors,
+    this.muted = false,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final child = Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: muted
+            ? colors.surfaceContainerHighest.withValues(alpha: 0.5)
+            : colors.primaryContainer.withValues(alpha: 0.35),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.4,
+                    color: colors.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: colors.onSurface,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (onTap != null)
+            Icon(Icons.expand_more_rounded, size: 18, color: colors.onSurfaceVariant),
+        ],
+      ),
+    );
+
+    if (onTap == null) return child;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: child,
+      ),
     );
   }
 }

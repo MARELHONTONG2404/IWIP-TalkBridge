@@ -38,6 +38,8 @@ class SpeechService {
 
   bool get isListening => _speech.isListening;
 
+  bool get isRetryingLocale => _isRetryingLocale;
+
   bool get isAvailable => _isAvailable;
 
   String? get lastError => _lastError;
@@ -106,6 +108,8 @@ class SpeechService {
     final nextLocale = _localeFallbackChain[_localeFallbackIndex];
     _isRetryingLocale = true;
 
+    // Fire-and-forget; retry internal — tidak memanggil onError.
+    // ignore: discarded_futures
     _listenWithLocale(nextLocale);
     return true;
   }
@@ -378,32 +382,26 @@ class SpeechService {
       chain.add(localeId);
     }
 
-    void addPreferredLocales() {
-      for (final preferred in ['id-ID', 'en-US', 'zh-CN']) {
-        for (final locale in locales) {
-          if (_normalizeLocale(locale.localeId) ==
-              _normalizeLocale(preferred)) {
-            add(locale.localeId);
-          }
+    // Hanya locale yang benar-benar ada di HP (hindari error_client id-ID palsu).
+    const iwipLangs = ['id', 'en', 'zh'];
+    for (final lang in iwipLangs) {
+      for (final locale in locales) {
+        if (_languageKey(locale.localeId) == lang) {
+          add(locale.localeId);
         }
-        for (final locale in locales) {
-          if (_languageKey(locale.localeId) == _languageKey(preferred)) {
-            add(locale.localeId);
-          }
-        }
-        add(preferred);
-        add(preferred.replaceAll('-', '_'));
       }
     }
 
-    // HP Android sering gagal jika locale null (online auto) dipakai pertama.
-    if (!kIsWeb && Platform.isAndroid) {
-      addPreferredLocales();
-      add(_autoLocaleToken);
-    } else {
-      add(_autoLocaleToken);
-      addPreferredLocales();
+    for (final locale in locales) {
+      add(locale.localeId);
     }
+
+    final system = await _speech.systemLocale();
+    add(system?.localeId);
+
+    // Online auto sebagai fallback terakhir.
+    add(_autoLocaleToken);
+
     return chain;
   }
 
@@ -472,13 +470,9 @@ class SpeechService {
       _lastError = 'Gagal memulai mikrofon: $e';
     }
 
-    if (_isRetryingLocale && _speech.isListening) {
-
+    // Locale fallback berhasil — jangan tampilkan error ke user.
+    if (_isRetryingLocale) {
       _isRetryingLocale = false;
-      final label = _activeLocale ?? localeToken;
-      _onError?.call(
-        'Mencoba mode lain ($label). Silakan bicara lagi.',
-      );
     }
   }
 

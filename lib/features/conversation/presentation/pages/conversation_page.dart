@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../../../../core/services/speech_service.dart';
 import '../../../../core/services/speech_text_processor.dart';
@@ -83,6 +84,17 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
     });
   }
 
+  bool _isFatalSpeechError(String message) {
+    final lower = message.toLowerCase();
+    return lower.contains('izin mikrofon') ||
+        lower.contains('permission') ||
+        lower.contains('diblokir') ||
+        lower.contains('ditolak') ||
+        lower.contains('dipakai app lain') ||
+        lower.contains('busy') ||
+        lower.contains('tidak tersedia');
+  }
+
   Future<void> _initializeSpeech() async {
     setState(() => _initializing = true);
 
@@ -90,7 +102,23 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
       onError: (message) {
         if (!mounted) return;
 
-        ref.read(conversationProvider.notifier).stopListening();
+        // Retry locale internal — bukan error fatal, abaikan.
+        if (message.contains('Mencoba mode lain')) return;
+
+        // Mic masih aktif = engine sedang recovery, jangan ganggu sesi.
+        if (_manualSessionActive &&
+            (_speechService.isListening || _speechService.isRetryingLocale)) {
+          _log('[Speech Recognition] recoverable: $message');
+          return;
+        }
+
+        // Error non-fatal saat sesi aktif (locale/network sementara).
+        if (_manualSessionActive && !_isFatalSpeechError(message)) {
+          _log('[Speech Recognition] non-fatal during session: $message');
+          return;
+        }
+
+        ref.read(conversationProvider.notifier).abortListening();
         ref.read(conversationProvider.notifier).setError(
               message,
               retryText: _committedText.trim().isNotEmpty
@@ -408,14 +436,13 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
     _showMessage('Disalin');
   }
 
-  void _shareCard(ConversationCardItem card) {
+  Future<void> _shareCard(ConversationCardItem card) async {
     final time = DateFormat('dd/MM/yyyy HH:mm').format(card.timestamp);
     final payload =
         '[${card.speakerLabel}] $time\n'
         '${card.sourceLanguage.nativeName}: ${card.sourceText}\n'
         '${card.targetLanguage.nativeName}: ${card.translatedText}';
-    Clipboard.setData(ClipboardData(text: payload));
-    _showMessage('Teks siap dibagikan (disalin)');
+    await Share.share(payload);
   }
 
   String _phaseLabel(ConversationPhase phase, String lang) {
@@ -537,22 +564,12 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
   Widget build(BuildContext context) {
     final state = ref.watch(conversationProvider);
     final settings = ref.watch(settingsProvider);
-    final micActive = _soundLevel > 0.3;
     final isListening = state.isListening || _manualSessionActive;
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
-    final panelColor = colors.surface;
-    final textColor = colors.onSurface;
-    final mutedTextColor = colors.onSurfaceVariant;
     final lang = settings.appLanguage;
-    final title = lang == 'Indonesia'
-        ? 'Percakapan'
-        : (lang == '中文' ? '对话' : 'Conversation');
-    final cameraLabel = lang == 'Indonesia'
-        ? 'Kamera'
-        : (lang == '中文' ? '相机' : 'Camera');
+    final statusLabel = _phaseLabel(state.phase, lang);
 
-    // Auto-scroll saat kartu baru ditambahkan.
     ref.listen(conversationProvider.select((s) => s.cards.length), (
       prev,
       next,
@@ -561,12 +578,13 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
     });
 
     return Scaffold(
-      backgroundColor: theme.scaffoldBackgroundColor,
+      backgroundColor: colors.surfaceContainerLowest,
       appBar: AppBar(
         elevation: 0,
-        backgroundColor: panelColor,
+        scrolledUnderElevation: 0,
+        backgroundColor: colors.surfaceContainerLowest,
         leading: IconButton(
-          icon: Icon(Icons.arrow_back_ios_new, color: textColor, size: 20),
+          icon: Icon(Icons.arrow_back_ios_new_rounded, size: 20, color: colors.onSurface),
           onPressed: () {
             if (context.canPop()) {
               context.pop();
@@ -576,324 +594,222 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
           },
         ),
         title: Text(
-          title,
-          style: TextStyle(fontWeight: FontWeight.w700, color: textColor),
+          lang == 'Indonesia' ? 'Terjemahan' : (lang == '中文' ? '翻译' : 'Translate'),
+          style: TextStyle(
+            fontWeight: FontWeight.w600,
+            fontSize: 17,
+            color: colors.onSurface,
+          ),
         ),
         centerTitle: true,
         actions: [
           if (state.cards.isNotEmpty)
             IconButton(
               tooltip: lang == 'Indonesia' ? 'Hapus riwayat' : 'Clear',
-              onPressed: () {
-                ref.read(conversationProvider.notifier).clearCards();
-              },
-              icon: Icon(Icons.delete_sweep_outlined, color: mutedTextColor),
+              onPressed: () => ref.read(conversationProvider.notifier).clearCards(),
+              icon: Icon(Icons.delete_outline_rounded, color: colors.onSurfaceVariant, size: 22),
             ),
           IconButton(
-            tooltip: lang == 'Indonesia' ? 'Favorit' : 'Favorites',
+            tooltip: 'Favorit',
             onPressed: () => context.push('/favorite'),
-            icon: Icon(Icons.star_border_rounded, color: textColor),
+            icon: Icon(Icons.star_outline_rounded, color: colors.onSurfaceVariant, size: 22),
           ),
-          const SizedBox(width: 4),
         ],
       ),
-      body: SafeArea(
-        child: Column(
-          children: [
-            // Status bar
-            _StatusBar(
-              phase: state.phase,
-              label: _phaseLabel(state.phase, lang),
-              colors: colors,
-              isListening: isListening,
-              soundLevel: _soundLevel,
+      body: Column(
+        children: [
+          if (state.hasError && state.errorMessage != null)
+            _MinimalErrorStrip(
+              message: state.errorMessage!,
+              onRetry: () async {
+                await ref.read(conversationProvider.notifier).retryLastTranslation();
+                if (!mounted) return;
+                final translated = ref.read(conversationProvider).translatedText;
+                if (translated.isNotEmpty && !translated.startsWith('Terjemahan')) {
+                  _scrollToBottom();
+                  await _ttsService.speak(
+                    translated,
+                    languageCode: ref.read(conversationProvider).targetLanguage.code,
+                  );
+                }
+              },
+              onDismiss: () => ref.read(conversationProvider.notifier).clearError(),
             ),
 
-            // Error banner
-            if (state.hasError && state.errorMessage != null)
-              _ErrorBanner(
-                message: state.errorMessage!,
-                onRetry: () async {
-                  await ref
-                      .read(conversationProvider.notifier)
-                      .retryLastTranslation();
-                  if (!mounted) return;
-                  final translated =
-                      ref.read(conversationProvider).translatedText;
-                  if (translated.isNotEmpty &&
-                      !translated.startsWith('Terjemahan')) {
-                    _scrollToBottom();
-                    await _ttsService.speak(
-                      translated,
-                      languageCode:
-                          ref.read(conversationProvider).targetLanguage.code,
-                    );
-                  }
-                },
-                onDismiss: () =>
-                    ref.read(conversationProvider.notifier).clearError(),
-              ),
-
-            // Conversation cards + live preview
-            Expanded(
-              child: Container(
-                width: double.infinity,
-                color: panelColor,
-                child: state.cards.isEmpty && !isListening
-                    ? _EmptyState(
-                        lang: lang,
-                        mutedTextColor: mutedTextColor,
-                        onType: _showTextInputDialog,
-                      )
-                    : ListView(
-                        controller: _scrollController,
-                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-                        children: [
-                          ...state.cards.map((card) {
-                            final isFav = ref
-                                .watch(favoriteProvider.notifier)
-                                .isFavorite(
-                                  card.sourceText,
-                                  card.translatedText,
-                                );
-                            return _ConversationResultCard(
-                              card: card,
-                              mutedTextColor: mutedTextColor,
-                              textColor: textColor,
-                              isFavorite: isFav,
-                              onSpeak: () => _ttsService.speak(
-                                card.translatedText,
-                                languageCode: card.targetLanguage.code,
+          Expanded(
+            child: state.cards.isEmpty && !isListening && !state.isSpeakerDraft
+                ? _EmptyState(
+                    lang: lang,
+                    speechReady: _speechReady,
+                    initializing: _initializing,
+                    onType: _showTextInputDialog,
+                    onRetryMic: _initializeSpeech,
+                  )
+                : ListView.builder(
+                    controller: _scrollController,
+                    padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+                    itemCount: state.cards.length +
+                        (isListening || state.isSpeakerDraft ? 1 : 0) +
+                        (state.isTranslating ? 1 : 0),
+                    itemBuilder: (context, index) {
+                      if (index < state.cards.length) {
+                        final card = state.cards[index];
+                        final isFav = ref
+                            .watch(favoriteProvider.notifier)
+                            .isFavorite(card.sourceText, card.translatedText);
+                        return _ConversationResultCard(
+                          card: card,
+                          isFavorite: isFav,
+                          onSpeak: () => _ttsService.speak(
+                            card.translatedText,
+                            languageCode: card.targetLanguage.code,
+                          ),
+                          onCopy: () => _copyText(card.translatedText),
+                          onShare: () => _shareCard(card),
+                          onFavorite: () => ref.read(favoriteProvider.notifier).toggleFavorite(
+                                sourceLang: card.sourceLanguage.name,
+                                targetLang: card.targetLanguage.name,
+                                originalText: card.sourceText,
+                                translatedText: card.translatedText,
                               ),
-                              onCopy: () => _copyText(card.translatedText),
-                              onCopySource: () => _copyText(card.sourceText),
-                              onShare: () => _shareCard(card),
-                              onFavorite: () => ref
-                                  .read(favoriteProvider.notifier)
-                                  .toggleFavorite(
-                                    sourceLang: card.sourceLanguage.name,
-                                    targetLang: card.targetLanguage.name,
-                                    originalText: card.sourceText,
-                                    translatedText: card.translatedText,
-                                  ),
-                              onDelete: () => ref
-                                  .read(conversationProvider.notifier)
-                                  .removeCard(card.id),
-                            );
-                          }),
-                          if (isListening || state.isSpeakerDraft)
-                            _LivePreviewCard(
-                              text: state.speakerText,
-                              isListening: isListening,
-                              soundLevel: _soundLevel,
-                              mutedTextColor: mutedTextColor,
-                              textColor: textColor,
-                            ),
-                          if (state.isTranslating)
-                            Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 16),
-                              child: Center(
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    SizedBox(
-                                      width: 20,
-                                      height: 20,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                        color: colors.primary,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 10),
-                                    Text(
-                                      _phaseLabel(state.phase, lang),
-                                      style: TextStyle(color: mutedTextColor),
-                                    ),
-                                  ],
+                          onDelete: () =>
+                              ref.read(conversationProvider.notifier).removeCard(card.id),
+                        );
+                      }
+
+                      final liveIndex = state.cards.length;
+                      if ((isListening || state.isSpeakerDraft) && index == liveIndex) {
+                        return _LivePreviewCard(
+                          text: state.speakerText,
+                          isListening: isListening,
+                        );
+                      }
+
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        child: Center(
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: colors.primary,
                                 ),
                               ),
-                            ),
-                        ],
-                      ),
-              ),
-            ),
-
-            // Target language selector
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
-              child: TargetLanguageSelector(
-                detectedSource: state.sourceLanguage,
-                targetLanguage: state.targetLanguage,
-                twoWayMode: state.twoWayMode,
-                onTargetChanged: (language) => ref
-                    .read(conversationProvider.notifier)
-                    .setTargetLanguage(language),
-                onTwoWayChanged: (v) => ref
-                    .read(conversationProvider.notifier)
-                    .setTwoWayMode(v),
-              ),
-            ),
-
-            // Control buttons
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 4, 16, 22),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  _ActionButton(
-                    icon: Icons.edit_note_rounded,
-                    label: lang == 'Indonesia' ? 'Ketik' : 'Type',
-                    onTap: _showTextInputDialog,
+                              const SizedBox(width: 10),
+                              Text(
+                                statusLabel,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: colors.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
                   ),
-                  if (isListening)
-                    _ActionButton(
-                      icon: Icons.check_circle_rounded,
-                      label: lang == 'Indonesia' ? 'Selesai' : 'Done',
-                      isPrimary: true,
-                      isActive: true,
-                      accentColor: colors.primary,
-                      onTap: _stopListening,
-                    )
-                  else
-                    _ActionButton(
-                      icon: Icons.mic_rounded,
-                      label: _initializing
-                          ? (lang == 'Indonesia' ? 'Menyiapkan...' : 'Wait...')
-                          : (lang == 'Indonesia' ? 'Dengarkan' : 'Listen'),
-                      isPrimary: true,
-                      isActive: micActive,
-                      accentColor: colors.primary,
-                      onTap: _startListening,
-                    ),
-                  if (isListening)
-                    _ActionButton(
-                      icon: Icons.stop_rounded,
-                      label: lang == 'Indonesia' ? 'Stop' : 'Stop',
-                      isPrimary: true,
-                      accentColor: colors.error,
-                      onTap: () async {
-                        _userRequestedStop = true;
-                        _manualSessionActive = false;
-                        await _speechService.stopListening();
-                        ref.read(conversationProvider.notifier).abortListening();
-                        setState(() {
-                          _soundLevel = 0;
-                          _committedText = '';
-                          _livePartial = '';
-                        });
-                      },
-                    )
-                  else
-                    _ActionButton(
-                      icon: Icons.document_scanner_outlined,
-                      label: cameraLabel,
-                      onTap: () => context.push('/camera'),
-                    ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _StatusBar extends StatelessWidget {
-  final ConversationPhase phase;
-  final String label;
-  final ColorScheme colors;
-  final bool isListening;
-  final double soundLevel;
-
-  const _StatusBar({
-    required this.phase,
-    required this.label,
-    required this.colors,
-    required this.isListening,
-    required this.soundLevel,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    IconData icon;
-    Color iconColor;
-    switch (phase) {
-      case ConversationPhase.listening:
-        icon = Icons.mic_rounded;
-        iconColor = colors.error;
-      case ConversationPhase.recognizing:
-        icon = Icons.hearing_rounded;
-        iconColor = colors.tertiary;
-      case ConversationPhase.detectingLanguage:
-        icon = Icons.language_rounded;
-        iconColor = colors.secondary;
-      case ConversationPhase.translating:
-        icon = Icons.translate_rounded;
-        iconColor = colors.primary;
-      case ConversationPhase.speaking:
-        icon = Icons.volume_up_rounded;
-        iconColor = colors.primary;
-      case ConversationPhase.error:
-        icon = Icons.error_outline_rounded;
-        iconColor = colors.error;
-      case ConversationPhase.completed:
-        icon = Icons.check_circle_outline_rounded;
-        iconColor = colors.primary;
-      case ConversationPhase.idle:
-        icon = Icons.chat_bubble_outline_rounded;
-        iconColor = colors.onSurfaceVariant;
-    }
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      decoration: BoxDecoration(
-        color: colors.surfaceContainerHighest.withValues(alpha: 0.5),
-        border: Border(
-          bottom: BorderSide(color: colors.outlineVariant.withValues(alpha: 0.5)),
-        ),
-      ),
-      child: Row(
-        children: [
-          Icon(icon, size: 18, color: iconColor),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              label,
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: colors.onSurface,
-              ),
-            ),
           ),
-          if (isListening)
-            SizedBox(
-              width: 60,
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(99),
-                child: LinearProgressIndicator(
-                  value: (soundLevel / 10).clamp(0.05, 1.0),
-                  minHeight: 4,
-                  backgroundColor: colors.surfaceContainerHighest,
-                  color: colors.primary,
+
+          // Bottom dock — minimal & fokus mic
+          Container(
+            decoration: BoxDecoration(
+              color: colors.surface,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+              boxShadow: [
+                BoxShadow(
+                  color: colors.shadow.withValues(alpha: 0.06),
+                  blurRadius: 20,
+                  offset: const Offset(0, -4),
+                ),
+              ],
+            ),
+            child: SafeArea(
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TargetLanguageSelector(
+                      detectedSource: state.sourceLanguage,
+                      targetLanguage: state.targetLanguage,
+                      twoWayMode: state.twoWayMode,
+                      onTargetChanged: (l) =>
+                          ref.read(conversationProvider.notifier).setTargetLanguage(l),
+                      onTwoWayChanged: (v) =>
+                          ref.read(conversationProvider.notifier).setTwoWayMode(v),
+                    ),
+                    const SizedBox(height: 20),
+                    Text(
+                      statusLabel,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                        color: isListening ? colors.primary : colors.onSurfaceVariant,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        _SideIconButton(
+                          icon: Icons.keyboard_rounded,
+                          onTap: _showTextInputDialog,
+                        ),
+                        const SizedBox(width: 28),
+                        _MicButton(
+                          isListening: isListening,
+                          isInitializing: _initializing,
+                          soundLevel: _soundLevel,
+                          onTap: isListening ? _stopListening : _startListening,
+                        ),
+                        const SizedBox(width: 28),
+                        if (isListening)
+                          _SideIconButton(
+                            icon: Icons.close_rounded,
+                            onTap: () async {
+                              _userRequestedStop = true;
+                              _manualSessionActive = false;
+                              await _speechService.stopListening();
+                              ref.read(conversationProvider.notifier).abortListening();
+                              setState(() {
+                                _soundLevel = 0;
+                                _committedText = '';
+                                _livePartial = '';
+                              });
+                            },
+                          )
+                        else
+                          _SideIconButton(
+                            icon: Icons.document_scanner_outlined,
+                            onTap: () => context.push('/camera'),
+                          ),
+                      ],
+                    ),
+                  ],
                 ),
               ),
             ),
+          ),
         ],
       ),
     );
   }
 }
 
-class _ErrorBanner extends StatelessWidget {
+// ─── Minimal UI widgets ───────────────────────────────────────────────────────
+
+class _MinimalErrorStrip extends StatelessWidget {
   final String message;
   final VoidCallback onRetry;
   final VoidCallback onDismiss;
 
-  const _ErrorBanner({
+  const _MinimalErrorStrip({
     required this.message,
     required this.onRetry,
     required this.onDismiss,
@@ -902,35 +818,40 @@ class _ErrorBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    return Material(
-      color: colors.errorContainer,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        child: Row(
-          children: [
-            Icon(Icons.warning_amber_rounded, color: colors.onErrorContainer),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                message,
-                style: TextStyle(
-                  fontSize: 13,
-                  color: colors.onErrorContainer,
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+      child: Material(
+        color: colors.errorContainer.withValues(alpha: 0.7),
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: Row(
+            children: [
+              Icon(Icons.info_outline_rounded, size: 16, color: colors.onErrorContainer),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  message,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 12, color: colors.onErrorContainer),
                 ),
               ),
-            ),
-            TextButton(
-              onPressed: onRetry,
-              child: Text(
-                'Coba Lagi',
-                style: TextStyle(color: colors.onErrorContainer),
+              TextButton(
+                onPressed: onRetry,
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                child: Text('Coba', style: TextStyle(fontSize: 12, color: colors.onErrorContainer)),
               ),
-            ),
-            IconButton(
-              icon: Icon(Icons.close, size: 18, color: colors.onErrorContainer),
-              onPressed: onDismiss,
-            ),
-          ],
+              GestureDetector(
+                onTap: onDismiss,
+                child: Icon(Icons.close, size: 16, color: colors.onErrorContainer),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -939,50 +860,71 @@ class _ErrorBanner extends StatelessWidget {
 
 class _EmptyState extends StatelessWidget {
   final String lang;
-  final Color mutedTextColor;
+  final bool speechReady;
+  final bool initializing;
   final VoidCallback onType;
+  final VoidCallback onRetryMic;
 
   const _EmptyState({
     required this.lang,
-    required this.mutedTextColor,
+    required this.speechReady,
+    required this.initializing,
     required this.onType,
+    required this.onRetryMic,
   });
 
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    final hint = lang == 'Indonesia'
-        ? 'Tekan Dengarkan, bicara, lalu tekan Selesai.\nBahasa akan terdeteksi otomatis.'
-        : (lang == '中文'
-              ? '点击聆听，说话，然后点完成。\n语言将自动检测。'
-              : 'Tap Listen, speak, then tap Done.\nLanguage is auto-detected.');
-
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(32),
+        padding: const EdgeInsets.all(40),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              Icons.forum_outlined,
-              size: 64,
-              color: colors.primary.withValues(alpha: 0.4),
-            ),
-            const SizedBox(height: 20),
-            Text(
-              hint,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 15,
-                height: 1.5,
-                color: mutedTextColor,
+            Container(
+              width: 72,
+              height: 72,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: colors.primaryContainer.withValues(alpha: 0.4),
+              ),
+              child: Icon(
+                speechReady ? Icons.translate_rounded : Icons.mic_off_outlined,
+                size: 32,
+                color: speechReady ? colors.primary : colors.error,
               ),
             ),
+            const SizedBox(height: 24),
+            Text(
+              lang == 'Indonesia' ? 'Mulai percakapan' : 'Start conversation',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w600,
+                color: colors.onSurface,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              lang == 'Indonesia'
+                  ? 'Tekan tombol mikrofon di bawah,\nbicara, lalu tap lagi untuk selesai.'
+                  : 'Tap the mic below, speak,\nthen tap again when done.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 14,
+                height: 1.5,
+                color: colors.onSurfaceVariant,
+              ),
+            ),
+            if (!speechReady && !initializing) ...[
+              const SizedBox(height: 16),
+              TextButton(onPressed: onRetryMic, child: const Text('Aktifkan mikrofon')),
+            ],
             const SizedBox(height: 20),
-            OutlinedButton.icon(
+            TextButton.icon(
               onPressed: onType,
-              icon: const Icon(Icons.edit_note_rounded),
-              label: Text(lang == 'Indonesia' ? 'Ketik teks' : 'Type text'),
+              icon: const Icon(Icons.edit_outlined, size: 18),
+              label: Text(lang == 'Indonesia' ? 'Atau ketik teks' : 'Or type text'),
             ),
           ],
         ),
@@ -994,80 +936,48 @@ class _EmptyState extends StatelessWidget {
 class _LivePreviewCard extends StatelessWidget {
   final String text;
   final bool isListening;
-  final double soundLevel;
-  final Color mutedTextColor;
-  final Color textColor;
 
-  const _LivePreviewCard({
-    required this.text,
-    required this.isListening,
-    required this.soundLevel,
-    required this.mutedTextColor,
-    required this.textColor,
-  });
+  const _LivePreviewCard({required this.text, required this.isListening});
 
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.only(top: 8),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        border: Border.all(
-          color: colors.primary.withValues(alpha: 0.4),
-          width: 1.5,
-        ),
-        borderRadius: BorderRadius.circular(16),
-        color: colors.primaryContainer.withValues(alpha: 0.15),
-      ),
-      child: Column(
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              if (isListening)
-                Container(
-                  width: 8,
-                  height: 8,
-                  decoration: BoxDecoration(
-                    color: colors.error,
-                    shape: BoxShape.circle,
-                  ),
+          if (isListening)
+            Container(
+              width: 8,
+              height: 8,
+              margin: const EdgeInsets.only(top: 8, right: 10),
+              decoration: BoxDecoration(
+                color: colors.error,
+                shape: BoxShape.circle,
+              ),
+            ),
+          Expanded(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                color: colors.surface,
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(
+                  color: colors.primary.withValues(alpha: 0.2),
                 ),
-              if (isListening) const SizedBox(width: 8),
-              Text(
-                isListening ? 'Live' : 'Preview',
+              ),
+              child: Text(
+                text.isEmpty ? '...' : text,
                 style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                  color: colors.primary,
+                  fontSize: 15,
+                  height: 1.45,
+                  fontStyle: FontStyle.italic,
+                  color: colors.onSurface.withValues(alpha: 0.8),
                 ),
               ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Text(
-            text.isEmpty ? '...' : text,
-            style: TextStyle(
-              fontSize: 17,
-              height: 1.35,
-              color: textColor,
-              fontStyle: FontStyle.italic,
             ),
           ),
-          if (isListening) ...[
-            const SizedBox(height: 12),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(99),
-              child: LinearProgressIndicator(
-                value: (soundLevel / 10).clamp(0.05, 1.0),
-                minHeight: 4,
-                backgroundColor: colors.surfaceContainerHighest,
-                color: colors.primary,
-              ),
-            ),
-          ],
         ],
       ),
     );
@@ -1077,24 +987,18 @@ class _LivePreviewCard extends StatelessWidget {
 class _ConversationResultCard extends StatelessWidget {
   const _ConversationResultCard({
     required this.card,
-    required this.mutedTextColor,
-    required this.textColor,
     required this.isFavorite,
     required this.onSpeak,
     required this.onCopy,
-    required this.onCopySource,
     required this.onShare,
     required this.onFavorite,
     required this.onDelete,
   });
 
   final ConversationCardItem card;
-  final Color mutedTextColor;
-  final Color textColor;
   final bool isFavorite;
   final VoidCallback onSpeak;
   final VoidCallback onCopy;
-  final VoidCallback onCopySource;
   final VoidCallback onShare;
   final VoidCallback onFavorite;
   final VoidCallback onDelete;
@@ -1102,178 +1006,40 @@ class _ConversationResultCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    final timeStr = DateFormat('dd/MM/yyyy HH:mm').format(card.timestamp);
+    final timeStr = DateFormat('HH:mm').format(card.timestamp);
 
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.only(bottom: 14),
-      decoration: BoxDecoration(
-        border: Border.all(color: colors.outlineVariant),
-        borderRadius: BorderRadius.circular(16),
-        color: colors.surface,
-      ),
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Header: speaker + timestamp
-          Container(
-            padding: const EdgeInsets.fromLTRB(14, 10, 8, 8),
-            decoration: BoxDecoration(
-              color: colors.surfaceContainerHighest.withValues(alpha: 0.4),
-              borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(16),
-              ),
-            ),
-            child: Row(
-              children: [
-                Text(
-                  card.speakerLabel,
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                    color: colors.primary,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  '→ ${card.targetLanguage.nativeName}',
-                  style: TextStyle(fontSize: 12, color: mutedTextColor),
-                ),
-                const Spacer(),
-                Text(
-                  timeStr,
-                  style: TextStyle(fontSize: 11, color: mutedTextColor),
-                ),
-              ],
-            ),
-          ),
-
-          // Source text
           Padding(
-            padding: const EdgeInsets.fromLTRB(14, 12, 14, 4),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  width: 3,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: colors.outlineVariant,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        card.sourceLanguage.nativeName,
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          color: mutedTextColor,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        card.sourceText,
-                        style: TextStyle(
-                          fontSize: 16,
-                          height: 1.35,
-                          color: textColor,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+            padding: const EdgeInsets.only(left: 4, bottom: 8),
+            child: Text(
+              '${card.speakerLabel} · $timeStr',
+              style: TextStyle(fontSize: 11, color: colors.onSurfaceVariant),
             ),
           ),
-
-          Divider(height: 1, color: colors.outlineVariant),
-
-          // Translated text
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 10, 14, 4),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  width: 3,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: colors.primary,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        card.targetLanguage.nativeName,
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          color: colors.primary,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        card.translatedText,
-                        style: TextStyle(
-                          fontSize: 17,
-                          height: 1.35,
-                          color: colors.primary,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
+          _Bubble(text: card.sourceText, isSource: true),
+          const SizedBox(height: 8),
+          _Bubble(
+            text: card.translatedText,
+            isSource: false,
+            subtitle: card.targetLanguage.nativeName,
           ),
-
-          // Actions
+          const SizedBox(height: 6),
           Row(
             children: [
-              IconButton(
-                tooltip: 'Speaker',
-                onPressed: onSpeak,
-                icon: Icon(Icons.volume_up_rounded, color: mutedTextColor),
+              _CardAction(icon: Icons.volume_up_rounded, onTap: onSpeak),
+              _CardAction(
+                icon: isFavorite ? Icons.star_rounded : Icons.star_outline_rounded,
+                onTap: onFavorite,
+                active: isFavorite,
               ),
-              IconButton(
-                tooltip: 'Favorit',
-                onPressed: onFavorite,
-                icon: Icon(
-                  isFavorite ? Icons.star_rounded : Icons.star_border_rounded,
-                  color: isFavorite ? colors.primary : mutedTextColor,
-                ),
-              ),
-              IconButton(
-                tooltip: 'Salin terjemahan',
-                onPressed: onCopy,
-                icon: Icon(Icons.copy_rounded, color: mutedTextColor),
-              ),
-              IconButton(
-                tooltip: 'Salin asli',
-                onPressed: onCopySource,
-                icon: Icon(Icons.content_copy_outlined, color: mutedTextColor),
-              ),
-              IconButton(
-                tooltip: 'Bagikan',
-                onPressed: onShare,
-                icon: Icon(Icons.share_rounded, color: mutedTextColor),
-              ),
+              _CardAction(icon: Icons.copy_rounded, onTap: onCopy),
+              _CardAction(icon: Icons.share_outlined, onTap: onShare),
               const Spacer(),
-              IconButton(
-                tooltip: 'Hapus',
-                onPressed: onDelete,
-                icon: Icon(Icons.delete_outline_rounded, color: colors.error),
-              ),
+              _CardAction(icon: Icons.delete_outline_rounded, onTap: onDelete, danger: true),
             ],
           ),
         ],
@@ -1282,63 +1048,167 @@ class _ConversationResultCard extends StatelessWidget {
   }
 }
 
-class _ActionButton extends StatelessWidget {
-  const _ActionButton({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-    this.isPrimary = false,
-    this.isActive = false,
-    this.accentColor,
-  });
+class _Bubble extends StatelessWidget {
+  final String text;
+  final bool isSource;
+  final String? subtitle;
 
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-  final bool isPrimary;
-  final bool isActive;
-  final Color? accentColor;
+  const _Bubble({
+    required this.text,
+    required this.isSource,
+    this.subtitle,
+  });
 
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    final color = accentColor ??
-        (isPrimary
-            ? (isActive ? colors.error : colors.primary)
-            : colors.secondary);
-    final size = isPrimary ? 72.0 : 52.0;
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Material(
-          color: color,
-          shape: const CircleBorder(),
-          child: InkWell(
-            onTap: onTap,
-            customBorder: const CircleBorder(),
-            child: SizedBox(
-              width: size,
-              height: size,
-              child: Icon(
-                icon,
-                size: isPrimary ? 32 : 24,
-                color: colors.onPrimary,
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+      decoration: BoxDecoration(
+        color: isSource
+            ? colors.surface
+            : colors.primaryContainer.withValues(alpha: 0.45),
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: isSource
+            ? [
+                BoxShadow(
+                  color: colors.shadow.withValues(alpha: 0.04),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ]
+            : null,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (subtitle != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Text(
+                subtitle!,
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.3,
+                  color: colors.primary,
+                ),
               ),
             ),
+          Text(
+            text,
+            style: TextStyle(
+              fontSize: isSource ? 15 : 16,
+              height: 1.45,
+              fontWeight: isSource ? FontWeight.w400 : FontWeight.w500,
+              color: isSource ? colors.onSurface : colors.onSurface,
+            ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CardAction extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback onTap;
+  final bool active;
+  final bool danger;
+
+  const _CardAction({
+    required this.icon,
+    required this.onTap,
+    this.active = false,
+    this.danger = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final color = danger
+        ? colors.error.withValues(alpha: 0.7)
+        : active
+            ? colors.primary
+            : colors.onSurfaceVariant.withValues(alpha: 0.7);
+    return IconButton(
+      visualDensity: VisualDensity.compact,
+      padding: const EdgeInsets.all(8),
+      constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+      onPressed: onTap,
+      icon: Icon(icon, size: 20, color: color),
+    );
+  }
+}
+
+class _MicButton extends StatelessWidget {
+  final bool isListening;
+  final bool isInitializing;
+  final double soundLevel;
+  final VoidCallback onTap;
+
+  const _MicButton({
+    required this.isListening,
+    required this.isInitializing,
+    required this.soundLevel,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final activeColor = isListening ? colors.error : colors.primary;
+    final scale = isListening ? 1.0 + (soundLevel / 10).clamp(0.0, 0.12) : 1.0;
+
+    return GestureDetector(
+      onTap: isInitializing ? null : onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        width: 72 * scale,
+        height: 72 * scale,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: activeColor,
+          boxShadow: [
+            BoxShadow(
+              color: activeColor.withValues(alpha: 0.35),
+              blurRadius: isListening ? 20 : 12,
+              spreadRadius: isListening ? 2 : 0,
+            ),
+          ],
         ),
-        const SizedBox(height: 8),
-        SizedBox(
-          width: 90,
-          child: Text(
-            label,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            textAlign: TextAlign.center,
-            style: TextStyle(color: colors.onSurface, fontSize: 12),
-          ),
+        child: Icon(
+          isListening ? Icons.stop_rounded : Icons.mic_rounded,
+          color: colors.onPrimary,
+          size: 32,
         ),
-      ],
+      ),
+    );
+  }
+}
+
+class _SideIconButton extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback onTap;
+
+  const _SideIconButton({required this.icon, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Material(
+      color: colors.surfaceContainerHighest.withValues(alpha: 0.6),
+      shape: const CircleBorder(),
+      child: InkWell(
+        onTap: onTap,
+        customBorder: const CircleBorder(),
+        child: SizedBox(
+          width: 44,
+          height: 44,
+          child: Icon(icon, size: 22, color: colors.onSurfaceVariant),
+        ),
+      ),
     );
   }
 }

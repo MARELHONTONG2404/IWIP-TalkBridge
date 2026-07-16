@@ -24,6 +24,6 @@ void main() {
     await tester.pump(const Duration(milliseconds: 800));
 
     expect(find.text('IWIP TalkBridge'), findsOneWidget);
-    expect(find.text('Tap to speak and translate'), findsOneWidget);
+    expect(find.text('Ketuk untuk bicara & terjemahkan'), findsOneWidget);
   });
 }
