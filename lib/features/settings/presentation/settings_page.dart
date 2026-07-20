@@ -46,22 +46,32 @@ class SettingsPage extends ConsumerWidget {
       }
     }
 
+    final theme = Theme.of(context);
+
     return Scaffold(
       appBar: AppBar(title: Text(t('Settings', 'Pengaturan', '设置'))),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
           Card(
+            margin: const EdgeInsets.only(bottom: 24),
             child: ListTile(
+              contentPadding: const EdgeInsets.all(12),
               leading: CircleAvatar(
+                radius: 28,
+                backgroundColor: theme.colorScheme.primaryContainer,
                 child: Text(
                   settings.userName.isNotEmpty ? settings.userName[0].toUpperCase() : 'U',
-                  style: const TextStyle(fontWeight: FontWeight.bold),
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold, 
+                    fontSize: 24, 
+                    color: theme.colorScheme.onPrimaryContainer,
+                  ),
                 ),
               ),
-              title: Text(settings.userName, style: const TextStyle(fontWeight: FontWeight.bold)),
+              title: Text(settings.userName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
               subtitle: Text(settings.userEmail),
-              trailing: const Icon(Icons.edit_rounded, size: 20),
+              trailing: Icon(Icons.edit_rounded, color: theme.colorScheme.primary),
               onTap: () async {
                 final nameController = TextEditingController(text: settings.userName);
                 final emailController = TextEditingController(text: settings.userEmail);
@@ -92,7 +102,7 @@ class SettingsPage extends ConsumerWidget {
                         onPressed: () => Navigator.pop(context),
                         child: Text(t('Cancel', 'Batal', '取消')),
                       ),
-                      TextButton(
+                      FilledButton(
                         onPressed: () {
                           notifier.updateProfile(nameController.text.trim(), emailController.text.trim());
                           Navigator.pop(context);
@@ -108,156 +118,217 @@ class SettingsPage extends ConsumerWidget {
               },
             ),
           ),
-          const SizedBox(height: 16),
 
-          Text(t('General', 'Umum', '常规'), style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
-          SwitchListTile(
-            title: Text(t('Dark Mode', 'Mode Gelap', '深色模式')),
-            secondary: const Icon(Icons.dark_mode),
-            value: settings.darkMode,
-            onChanged: (val) => notifier.updateDarkMode(val),
+          Padding(
+            padding: const EdgeInsets.only(left: 8, bottom: 8),
+            child: Text(t('General', 'Umum', '常规'), style: TextStyle(fontWeight: FontWeight.bold, color: theme.colorScheme.primary)),
           ),
-          ListTile(
-            title: Text(t('Language', 'Bahasa', '语言')),
-            subtitle: Text(settings.appLanguage),
-            leading: const Icon(Icons.language),
-            onTap: () => showPickerDialog(t('Select Language', 'Pilih Bahasa', '选择语言'), ['English', 'Indonesia', '中文'], settings.appLanguage, (val) => notifier.updateAppLanguage(val)),
-          ),
-          ListTile(
-            title: Text(t('Default Translation Language', 'Bahasa Terjemahan Default', '默认翻译语言')),
-            subtitle: Text('${settings.defaultSourceLang} -> ${settings.defaultTargetLang}'),
-            leading: const Icon(Icons.translate),
-            onTap: () async {
-              await showPickerDialog(t('Select Source Language', 'Pilih Bahasa Sumber', '选择源语言'), ['English', 'Indonesia', '中文'], settings.defaultSourceLang, (src) async {
-                await showPickerDialog(t('Select Target Language', 'Pilih Bahasa Tujuan', '选择目标语言'), ['English', 'Indonesia', '中文'], settings.defaultTargetLang, (tgt) {
-                  notifier.updateDefaultTranslationLanguage(src, tgt);
-                });
-              });
-            },
-          ),
-          const Divider(),
-
-          Text(t('Speech', 'Suara', '语音'), style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
-          ListTile(
-            title: Text(t('Speech Speed', 'Kecepatan Bicara', '语速')),
-            subtitle: Text(settings.speechSpeed),
-            leading: const Icon(Icons.speed),
-            onTap: () => showPickerDialog(t('Speech Speed', 'Kecepatan Bicara', '语速'), ['Slow', 'Normal', 'Fast'], settings.speechSpeed, (val) => notifier.updateSpeechSpeed(val)),
-          ),
-          ListTile(
-            title: Text(t('Voice Gender', 'Gender Suara', '语音性别')),
-            subtitle: Text(settings.voiceGender),
-            leading: const Icon(Icons.person_outline),
-            onTap: () => showPickerDialog(t('Voice Gender', 'Gender Suara', '语音性别'), ['Male', 'Female'], settings.voiceGender, (val) => notifier.updateVoiceGender(val)),
-          ),
-          ListTile(
-            title: Text(
-              t('TTS Voice Data Guide', 'Petunjuk Paket Suara (TTS)', '语音包安装指南'),
-            ),
-            subtitle: Text(
-              t(
-                'Install voice packs for translation audio',
-                'Cara unduh suara Indonesia / 中文 / English',
-                '安装印尼语 / 中文 / 英语语音包',
-              ),
-            ),
-            leading: const Icon(Icons.record_voice_over_outlined),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => TtsGuidePage(appLanguage: lang),
-              ),
+          Card(
+            margin: const EdgeInsets.only(bottom: 24),
+            child: Column(
+              children: [
+                SwitchListTile(
+                  title: Text(t('Dark Mode', 'Mode Gelap', '深色模式')),
+                  secondary: const Icon(Icons.dark_mode_outlined),
+                  value: settings.darkMode,
+                  onChanged: (val) => notifier.updateDarkMode(val),
+                ),
+                Divider(height: 1, indent: 56, color: theme.dividerColor),
+                ListTile(
+                  title: Text(t('Language', 'Bahasa', '语言')),
+                  subtitle: Text(settings.appLanguage),
+                  leading: const Icon(Icons.language_outlined),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => showPickerDialog(t('Select Language', 'Pilih Bahasa', '选择语言'), ['English', 'Indonesia', '中文'], settings.appLanguage, (val) => notifier.updateAppLanguage(val)),
+                ),
+                Divider(height: 1, indent: 56, color: theme.dividerColor),
+                ListTile(
+                  title: Text(t('Default Translation Language', 'Bahasa Terjemahan Default', '默认翻译语言')),
+                  subtitle: Text('${settings.defaultSourceLang} -> ${settings.defaultTargetLang}'),
+                  leading: const Icon(Icons.translate),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () async {
+                    await showPickerDialog(t('Select Source Language', 'Pilih Bahasa Sumber', '选择源语言'), ['English', 'Indonesia', '中文'], settings.defaultSourceLang, (src) async {
+                      await showPickerDialog(t('Select Target Language', 'Pilih Bahasa Tujuan', '选择目标语言'), ['English', 'Indonesia', '中文'], settings.defaultTargetLang, (tgt) {
+                        notifier.updateDefaultTranslationLanguage(src, tgt);
+                      });
+                    });
+                  },
+                ),
+              ],
             ),
           ),
-          const Divider(),
 
-          Text(t('Preferences', 'Preferensi', '偏好设置'), style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
-          SwitchListTile(
-            title: Text(t('Auto Play Translation', 'Putar Terjemahan Otomatis', '自动播放翻译')),
-            secondary: const Icon(Icons.play_circle_outline),
-            value: settings.autoPlayTranslation,
-            onChanged: (val) => notifier.updateAutoPlayTranslation(val),
+          Padding(
+            padding: const EdgeInsets.only(left: 8, bottom: 8),
+            child: Text(t('Speech', 'Suara', '语音'), style: TextStyle(fontWeight: FontWeight.bold, color: theme.colorScheme.primary)),
           ),
-          SwitchListTile(
-            title: Text(t('Auto Save History', 'Simpan Riwayat Otomatis', '自动保存历史记录')),
-            secondary: const Icon(Icons.history),
-            value: settings.autoSaveHistory,
-            onChanged: (val) => notifier.updateAutoSaveHistory(val),
+          Card(
+            margin: const EdgeInsets.only(bottom: 24),
+            child: Column(
+              children: [
+                ListTile(
+                  title: Text(t('Speech Speed', 'Kecepatan Bicara', '语速')),
+                  subtitle: Text(settings.speechSpeed),
+                  leading: const Icon(Icons.speed),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => showPickerDialog(t('Speech Speed', 'Kecepatan Bicara', '语速'), ['Slow', 'Normal', 'Fast'], settings.speechSpeed, (val) => notifier.updateSpeechSpeed(val)),
+                ),
+                Divider(height: 1, indent: 56, color: theme.dividerColor),
+                ListTile(
+                  title: Text(t('Voice Gender', 'Gender Suara', '语音性别')),
+                  subtitle: Text(settings.voiceGender),
+                  leading: const Icon(Icons.person_outline),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => showPickerDialog(t('Voice Gender', 'Gender Suara', '语音性别'), ['Male', 'Female'], settings.voiceGender, (val) => notifier.updateVoiceGender(val)),
+                ),
+                Divider(height: 1, indent: 56, color: theme.dividerColor),
+                ListTile(
+                  title: Text(
+                    t('TTS Voice Data Guide', 'Petunjuk Paket Suara (TTS)', '语音包安装指南'),
+                  ),
+                  subtitle: Text(
+                    t(
+                      'Install voice packs for translation audio',
+                      'Cara unduh suara Indonesia / 中文 / English',
+                      '安装印尼语 / 中文 / 英语语音包',
+                    ),
+                  ),
+                  leading: const Icon(Icons.record_voice_over_outlined),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => TtsGuidePage(appLanguage: lang),
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
-          SwitchListTile(
-            title: Text(t('Notifications', 'Notifikasi', '通知')),
-            secondary: const Icon(Icons.notifications_none),
-            value: settings.notifications,
-            onChanged: (val) => notifier.updateNotifications(val),
+
+          Padding(
+            padding: const EdgeInsets.only(left: 8, bottom: 8),
+            child: Text(t('Preferences', 'Preferensi', '偏好设置'), style: TextStyle(fontWeight: FontWeight.bold, color: theme.colorScheme.primary)),
           ),
-          const Divider(),
+          Card(
+            margin: const EdgeInsets.only(bottom: 24),
+            child: Column(
+              children: [
+                SwitchListTile(
+                  title: Text(t('Auto Play Translation', 'Putar Terjemahan Otomatis', '自动播放翻译')),
+                  secondary: const Icon(Icons.play_circle_outline),
+                  value: settings.autoPlayTranslation,
+                  onChanged: (val) => notifier.updateAutoPlayTranslation(val),
+                ),
+                Divider(height: 1, indent: 56, color: theme.dividerColor),
+                SwitchListTile(
+                  title: Text(t('Auto Save History', 'Simpan Riwayat Otomatis', '自动保存历史记录')),
+                  secondary: const Icon(Icons.history),
+                  value: settings.autoSaveHistory,
+                  onChanged: (val) => notifier.updateAutoSaveHistory(val),
+                ),
+                Divider(height: 1, indent: 56, color: theme.dividerColor),
+                SwitchListTile(
+                  title: Text(t('Notifications', 'Notifikasi', '通知')),
+                  secondary: const Icon(Icons.notifications_none),
+                  value: settings.notifications,
+                  onChanged: (val) => notifier.updateNotifications(val),
+                ),
+              ],
+            ),
+          ),
           
-          ListTile(
-            title: Text(t('Clear Cache', 'Hapus Cache', '清除缓存')),
-            leading: const Icon(Icons.delete_sweep),
-            onTap: () => showDialog(
-              context: context,
-              builder: (c) => AlertDialog(
-                title: Text(t('Clear Cache?', 'Hapus Cache?', '清除缓存?')),
-                actions: [
-                  TextButton(onPressed: () => Navigator.pop(c), child: Text(t('No', 'Tidak', '否'))),
-                  TextButton(
-                    onPressed: () {
-                      PaintingBinding.instance.imageCache.clear();
-                      Navigator.pop(c);
-                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(t('Cache cleared', 'Cache dihapus', '缓存已清除'))));
-                    },
-                    child: Text(t('Yes', 'Ya', '是')),
-                  )
-                ],
-              ),
+          Padding(
+            padding: const EdgeInsets.only(left: 8, bottom: 8),
+            child: Text(t('Data Management', 'Manajemen Data', '数据管理'), style: TextStyle(fontWeight: FontWeight.bold, color: theme.colorScheme.primary)),
+          ),
+          Card(
+            margin: const EdgeInsets.only(bottom: 24),
+            child: Column(
+              children: [
+                ListTile(
+                  title: Text(t('Clear Cache', 'Hapus Cache', '清除缓存')),
+                  leading: const Icon(Icons.delete_sweep_outlined),
+                  onTap: () => showDialog(
+                    context: context,
+                    builder: (c) => AlertDialog(
+                      title: Text(t('Clear Cache?', 'Hapus Cache?', '清除缓存?')),
+                      actions: [
+                        TextButton(onPressed: () => Navigator.pop(c), child: Text(t('No', 'Tidak', '否'))),
+                        TextButton(
+                          onPressed: () {
+                            PaintingBinding.instance.imageCache.clear();
+                            Navigator.pop(c);
+                            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(t('Cache cleared', 'Cache dihapus', '缓存已清除'))));
+                          },
+                          child: Text(t('Yes', 'Ya', '是')),
+                        )
+                      ],
+                    ),
+                  ),
+                ),
+                Divider(height: 1, indent: 56, color: theme.dividerColor),
+                ListTile(
+                  title: Text(t('Clear History', 'Hapus Riwayat', '清除历史记录'), style: TextStyle(color: theme.colorScheme.error)),
+                  leading: Icon(Icons.delete_forever_outlined, color: theme.colorScheme.error),
+                  onTap: () => showDialog(
+                    context: context,
+                    builder: (c) => AlertDialog(
+                      title: Text(t('Clear History?', 'Hapus Riwayat?', '清除历史记录?')),
+                      content: Text(t('This action cannot be undone.', 'Tindakan ini tidak dapat dibatalkan.', '此操作无法撤消。')),
+                      actions: [
+                        TextButton(onPressed: () => Navigator.pop(c), child: Text(t('No', 'Tidak', '否'))),
+                        TextButton(
+                          onPressed: () {
+                            ref.read(historyListProvider.notifier).clearAll();
+                            Navigator.pop(c);
+                            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(t('History cleared', 'Riwayat dihapus', '历史记录已清除'))));
+                          },
+                          child: Text(t('Yes', 'Ya', '是')),
+                        )
+                      ],
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
-          ListTile(
-            title: Text(t('Clear History', 'Hapus Riwayat', '清除历史记录')),
-            leading: const Icon(Icons.delete_forever, color: Colors.red),
-            onTap: () => showDialog(
-              context: context,
-              builder: (c) => AlertDialog(
-                title: Text(t('Clear History?', 'Hapus Riwayat?', '清除历史记录?')),
-                content: Text(t('This action cannot be undone.', 'Tindakan ini tidak dapat dibatalkan.', '此操作无法撤消。')),
-                actions: [
-                  TextButton(onPressed: () => Navigator.pop(c), child: Text(t('No', 'Tidak', '否'))),
-                  TextButton(
-                    onPressed: () {
-                      ref.read(historyListProvider.notifier).clearAll();
-                      Navigator.pop(c);
-                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(t('History cleared', 'Riwayat dihapus', '历史记录已清除'))));
-                    },
-                    child: Text(t('Yes', 'Ya', '是')),
-                  )
-                ],
-              ),
-            ),
-          ),
-          const Divider(),
 
-          Text(t('About', 'Tentang', '关于'), style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
-          ListTile(
-            title: Text(t('About IWIP TalkBridge', 'Tentang IWIP TalkBridge', '关于 IWIP TalkBridge')),
-            leading: const Icon(Icons.info_outline),
-            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AboutPage())),
+          Padding(
+            padding: const EdgeInsets.only(left: 8, bottom: 8),
+            child: Text(t('About', 'Tentang', '关于'), style: TextStyle(fontWeight: FontWeight.bold, color: theme.colorScheme.primary)),
           ),
-          FutureBuilder<PackageInfo>(
-            future: PackageInfo.fromPlatform(),
-            builder: (context, snapshot) {
-              return ListTile(
-                title: Text(t('Version', 'Versi', '版本')),
-                subtitle: Text(snapshot.hasData ? snapshot.data!.version : 'Loading...'),
-                leading: const Icon(Icons.numbers),
-              );
-            },
-          ),
-          ListTile(
-            title: Text(t('Privacy Policy', 'Kebijakan Privasi', '隐私政策')),
-            leading: const Icon(Icons.privacy_tip_outlined),
-            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const PrivacyPolicyPage())),
+          Card(
+            margin: const EdgeInsets.only(bottom: 24),
+            child: Column(
+              children: [
+                ListTile(
+                  title: Text(t('About IWIP TalkBridge', 'Tentang IWIP TalkBridge', '关于 IWIP TalkBridge')),
+                  leading: const Icon(Icons.info_outline),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AboutPage())),
+                ),
+                Divider(height: 1, indent: 56, color: theme.dividerColor),
+                FutureBuilder<PackageInfo>(
+                  future: PackageInfo.fromPlatform(),
+                  builder: (context, snapshot) {
+                    return ListTile(
+                      title: Text(t('Version', 'Versi', '版本')),
+                      subtitle: Text(snapshot.hasData ? snapshot.data!.version : 'Loading...'),
+                      leading: const Icon(Icons.numbers),
+                    );
+                  },
+                ),
+                Divider(height: 1, indent: 56, color: theme.dividerColor),
+                ListTile(
+                  title: Text(t('Privacy Policy', 'Kebijakan Privasi', '隐私政策')),
+                  leading: const Icon(Icons.privacy_tip_outlined),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const PrivacyPolicyPage())),
+                ),
+              ],
+            ),
           ),
         ],
       ),

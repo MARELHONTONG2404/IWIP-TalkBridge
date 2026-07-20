@@ -23,6 +23,7 @@ class _FavoritePageState extends ConsumerState<FavoritePage> {
   Widget build(BuildContext context) {
     final favorites = ref.watch(favoriteProvider);
     final notifier = ref.read(favoriteProvider.notifier);
+    final theme = Theme.of(context);
 
     return Scaffold(
       appBar: AppBar(
@@ -69,19 +70,28 @@ class _FavoritePageState extends ConsumerState<FavoritePage> {
         ],
       ),
       body: favorites.isEmpty
-          ? _buildEmptyState()
+          ? _buildEmptyState(theme)
           : ListView.builder(
               padding: const EdgeInsets.all(16),
               itemCount: favorites.length,
               itemBuilder: (context, index) {
                 final item = favorites[index];
-                return Card(
+                return Container(
                   margin: const EdgeInsets.only(bottom: 16),
-                  shape: RoundedRectangleBorder(
+                  decoration: BoxDecoration(
+                    color: theme.cardColor,
                     borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: theme.dividerColor),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.04),
+                        blurRadius: 12,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
                   ),
                   child: Padding(
-                    padding: const EdgeInsets.all(12.0),
+                    padding: const EdgeInsets.all(16.0),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -90,32 +100,33 @@ class _FavoritePageState extends ConsumerState<FavoritePage> {
                           children: [
                             Text(
                               '${item.sourceLang} → ${item.targetLang}',
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontWeight: FontWeight.bold,
-                                color: Colors.blueGrey,
+                                color: theme.colorScheme.onSurfaceVariant,
                               ),
                             ),
                             Text(
                               item.timestamp.toString().substring(0, 16),
-                              style: const TextStyle(fontSize: 12, color: Colors.grey),
+                              style: TextStyle(fontSize: 12, color: theme.textTheme.bodyMedium?.color?.withValues(alpha: 0.6)),
                             ),
                           ],
                         ),
-                        const SizedBox(height: 8),
+                        const SizedBox(height: 12),
                         Text(
                           item.originalText,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.w500,
+                            color: theme.textTheme.titleMedium?.color,
                           ),
                         ),
-                        const Divider(height: 16),
+                        Divider(height: 24, color: theme.dividerColor),
                         Text(
                           item.translatedText,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.bold,
-                            color: Colors.teal,
+                            color: theme.colorScheme.primary,
                           ),
                         ),
                         const SizedBox(height: 8),
@@ -123,7 +134,7 @@ class _FavoritePageState extends ConsumerState<FavoritePage> {
                           mainAxisAlignment: MainAxisAlignment.end,
                           children: [
                             IconButton(
-                              icon: const Icon(Icons.volume_up),
+                              icon: Icon(Icons.volume_up, color: theme.colorScheme.primary),
                               tooltip: 'Speak translation',
                               onPressed: () {
                                 String code = 'en';
@@ -145,7 +156,7 @@ class _FavoritePageState extends ConsumerState<FavoritePage> {
                               },
                             ),
                             IconButton(
-                              icon: const Icon(Icons.delete_outline, color: Colors.red),
+                              icon: Icon(Icons.delete_outline, color: theme.colorScheme.error),
                               tooltip: 'Remove',
                               onPressed: () => notifier.removeFavorite(item.id),
                             ),
@@ -160,26 +171,37 @@ class _FavoritePageState extends ConsumerState<FavoritePage> {
     );
   }
 
-  Widget _buildEmptyState() {
+  Widget _buildEmptyState(ThemeData theme) {
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.star_border_rounded, size: 80, color: Colors.grey[300]),
+            Icon(
+              Icons.star_border_rounded, 
+              size: 80, 
+              color: theme.colorScheme.primary.withValues(alpha: 0.2),
+            ),
             const SizedBox(height: 16),
             Text(
               'Belum ada favorit',
-              style: TextStyle(fontSize: 18, color: Colors.grey[600]),
+              style: TextStyle(
+                fontSize: 18, 
+                color: theme.textTheme.bodyMedium?.color?.withValues(alpha: 0.6),
+                fontWeight: FontWeight.w500,
+              ),
             ),
             const SizedBox(height: 8),
             Text(
               'Muat frasa HSE siap pakai (Indonesia ↔ 中文)',
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 14, color: Colors.grey[500]),
+              style: TextStyle(
+                fontSize: 14, 
+                color: theme.textTheme.bodyMedium?.color?.withValues(alpha: 0.5),
+              ),
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 24),
             FilledButton.icon(
               onPressed: () =>
                   ref.read(favoriteProvider.notifier).ensureHsePhrases(),

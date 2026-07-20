@@ -11,6 +11,8 @@ class HistoryPage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final historyState = ref.watch(historyListProvider);
 
+    final theme = Theme.of(context);
+
     return Scaffold(
       appBar: AppBar(title: const Text('History')),
       body: historyState.when(
@@ -19,29 +21,38 @@ class HistoryPage extends ConsumerWidget {
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(Icons.history_toggle_off_rounded, size: 80, color: Colors.grey[300]),
+                    Icon(
+                      Icons.history_toggle_off_rounded, 
+                      size: 80, 
+                      color: theme.colorScheme.primary.withValues(alpha: 0.2),
+                    ),
                     const SizedBox(height: 16),
-                    const Text(
+                    Text(
                       'No history yet',
-                      style: TextStyle(fontSize: 18, color: Colors.grey, fontWeight: FontWeight.w500),
+                      style: TextStyle(
+                        fontSize: 18, 
+                        color: theme.textTheme.bodyMedium?.color?.withValues(alpha: 0.6), 
+                        fontWeight: FontWeight.w500,
+                      ),
                     ),
                   ],
                 ),
               )
             : ListView.builder(
-          itemCount: history.length,
-          itemBuilder: (context, index) {
-            final item = history[index];
-            return HistoryCard(
-              item: item,
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => HistoryDetailPage(item: item)),
+                padding: const EdgeInsets.all(16),
+                itemCount: history.length,
+                itemBuilder: (context, index) {
+                  final item = history[index];
+                  return HistoryCard(
+                    item: item,
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => HistoryDetailPage(item: item)),
+                    ),
+                    onDelete: () => ref.read(historyListProvider.notifier).deleteItem(item.id),
+                  );
+                },
               ),
-              onDelete: () => ref.read(historyListProvider.notifier).deleteItem(item.id),
-            );
-          },
-        ),
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, stack) => Center(child: Text('Error: $e')),
       ),
