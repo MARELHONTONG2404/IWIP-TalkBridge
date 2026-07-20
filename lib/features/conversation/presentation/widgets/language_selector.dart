@@ -2,6 +2,170 @@ import 'package:flutter/material.dart';
 
 import '../../../language/data/language_model.dart';
 
+/// Warna khusus halaman translate (dark, minimal).
+abstract final class TranslatePageColors {
+  static const background = Color(0xFF121212);
+  static const card = Color(0xFF1E1E1E);
+  static const cardElevated = Color(0xFF252525);
+  static const textPrimary = Color(0xFFFFFFFF);
+  static const textMuted = Color(0xFF9E9E9E);
+  static const divider = Color(0xFF2C2C2C);
+  static const accentRed = Color(0xFFE53935);
+  static const accentBlue = Color(0xFF42A5F5);
+  static const pillBg = Color(0xFF2A2A2A);
+}
+
+/// Bar pemilih bahasa ringkas untuk header (Auto → Target).
+class CompactHeaderLanguageBar extends StatelessWidget {
+  final LanguageModel detectedSource;
+  final LanguageModel targetLanguage;
+  final ValueChanged<LanguageModel> onTargetChanged;
+
+  const CompactHeaderLanguageBar({
+    super.key,
+    required this.detectedSource,
+    required this.targetLanguage,
+    required this.onTargetChanged,
+  });
+
+  Future<void> _pickTarget(BuildContext context) async {
+    final picked = await showModalBottomSheet<LanguageModel>(
+      context: context,
+      backgroundColor: TranslatePageColors.card,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return DraggableScrollableSheet(
+          expand: false,
+          initialChildSize: 0.65,
+          minChildSize: 0.4,
+          maxChildSize: 0.9,
+          builder: (context, scrollController) {
+            return Column(
+              children: [
+                const SizedBox(height: 12),
+                Container(
+                  width: 42,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: TranslatePageColors.divider,
+                    borderRadius: BorderRadius.circular(99),
+                  ),
+                ),
+                const Padding(
+                  padding: EdgeInsets.all(20),
+                  child: Text(
+                    'Pilih Bahasa Tujuan',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                      color: TranslatePageColors.textPrimary,
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: ListView.separated(
+                    controller: scrollController,
+                    itemCount: languages.length,
+                    separatorBuilder: (_, _) => const Divider(
+                      height: 1,
+                      color: TranslatePageColors.divider,
+                    ),
+                    itemBuilder: (context, index) {
+                      final language = languages[index];
+                      final selected = language.code == targetLanguage.code;
+                      return ListTile(
+                        leading: Text(
+                          language.flag,
+                          style: const TextStyle(fontSize: 26),
+                        ),
+                        title: Text(
+                          language.nativeName,
+                          style: TextStyle(
+                            color: TranslatePageColors.textPrimary,
+                            fontWeight:
+                                selected ? FontWeight.w700 : FontWeight.w500,
+                          ),
+                        ),
+                        trailing: selected
+                            ? const Icon(
+                                Icons.check_circle,
+                                color: TranslatePageColors.accentBlue,
+                              )
+                            : null,
+                        onTap: () => Navigator.pop(context, language),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+    if (picked != null) onTargetChanged(picked);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: TranslatePageColors.pillBg,
+      borderRadius: BorderRadius.circular(24),
+      child: InkWell(
+        onTap: () => _pickTarget(context),
+        borderRadius: BorderRadius.circular(24),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Flexible(
+                child: Text(
+                  'Deteksi bahasa',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: TranslatePageColors.textMuted,
+                  ),
+                ),
+              ),
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 6),
+                child: Icon(
+                  Icons.arrow_forward_rounded,
+                  size: 16,
+                  color: TranslatePageColors.textMuted,
+                ),
+              ),
+              Flexible(
+                child: Text(
+                  targetLanguage.nativeName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: TranslatePageColors.textPrimary,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 2),
+              const Icon(
+                Icons.expand_more_rounded,
+                size: 18,
+                color: TranslatePageColors.textMuted,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// Pemilih bahasa tujuan saja — bahasa sumber dideteksi otomatis.
 class TargetLanguageSelector extends StatelessWidget {
   final LanguageModel detectedSource;
@@ -212,110 +376,6 @@ class _LangPill extends StatelessWidget {
         onTap: onTap,
         borderRadius: BorderRadius.circular(14),
         child: child,
-      ),
-    );
-  }
-}
-
-class _AutoDetectChip extends StatelessWidget {
-  final LanguageModel detectedSource;
-  final ColorScheme colors;
-
-  const _AutoDetectChip({
-    required this.detectedSource,
-    required this.colors,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
-      decoration: BoxDecoration(
-        color: colors.surface,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: colors.outlineVariant),
-      ),
-      child: Column(
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.auto_awesome, size: 16, color: colors.primary),
-              const SizedBox(width: 4),
-              Text(
-                'Auto',
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  color: colors.primary,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Text(
-            detectedSource.nativeName,
-            textAlign: TextAlign.center,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontWeight: FontWeight.w600,
-              fontSize: 15,
-              color: colors.onSurface,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _TargetChip extends StatelessWidget {
-  final LanguageModel language;
-  final VoidCallback onTap;
-  final ColorScheme colors;
-
-  const _TargetChip({
-    required this.language,
-    required this.onTap,
-    required this.colors,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: colors.primaryContainer.withValues(alpha: 0.4),
-      borderRadius: BorderRadius.circular(20),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(20),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Flexible(
-                child: Text(
-                  language.nativeName,
-                  textAlign: TextAlign.center,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 15,
-                    color: colors.onSurface,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 4),
-              Icon(
-                Icons.expand_more_rounded,
-                color: colors.onSurfaceVariant,
-                size: 20,
-              ),
-            ],
-          ),
-        ),
       ),
     );
   }

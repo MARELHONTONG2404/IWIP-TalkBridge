@@ -150,6 +150,26 @@ class SettingsPage extends ConsumerWidget {
             leading: const Icon(Icons.person_outline),
             onTap: () => showPickerDialog(t('Voice Gender', 'Gender Suara', '语音性别'), ['Male', 'Female'], settings.voiceGender, (val) => notifier.updateVoiceGender(val)),
           ),
+          ListTile(
+            title: Text(
+              t('TTS Voice Data Guide', 'Petunjuk Paket Suara (TTS)', '语音包安装指南'),
+            ),
+            subtitle: Text(
+              t(
+                'Install voice packs for translation audio',
+                'Cara unduh suara Indonesia / 中文 / English',
+                '安装印尼语 / 中文 / 英语语音包',
+              ),
+            ),
+            leading: const Icon(Icons.record_voice_over_outlined),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => TtsGuidePage(appLanguage: lang),
+              ),
+            ),
+          ),
           const Divider(),
 
           Text(t('Preferences', 'Preferensi', '偏好设置'), style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
@@ -260,6 +280,251 @@ class AboutPage extends StatelessWidget {
             const Text('Real-Time Conversation Translator'),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class TtsGuidePage extends StatelessWidget {
+  final String appLanguage;
+
+  const TtsGuidePage({super.key, required this.appLanguage});
+
+  String t(String en, String id, String zh) {
+    if (appLanguage == 'Indonesia') return id;
+    if (appLanguage == '中文') return zh;
+    return en;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(t('TTS Voice Data Guide', 'Petunjuk Paket Suara (TTS)', '语音包安装指南')),
+      ),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+        children: [
+          Card(
+            color: colors.primaryContainer.withValues(alpha: 0.35),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.info_outline, color: colors.primary),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      t(
+                        'If translation works but you hear no audio, install Google TTS voice data on your phone.',
+                        'Jika terjemahan berhasil tapi tidak ada suara, unduh paket suara Google TTS di HP.',
+                        '如果翻译成功但没有声音，请在手机上下载 Google TTS 语音包。',
+                      ),
+                      style: TextStyle(height: 1.5, color: colors.onSurface),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
+          Text(
+            t('Samsung — easiest way', 'Samsung — cara termudah', '三星手机 — 最简单方法'),
+            style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            t(
+              'One UI 6.1 (Android 14): Settings → General management → Text-to-speech (direct, no "Language and input").',
+              'One UI 6.1 (Android 14): Pengaturan → Manajemen umum → Ubah teks menjadi suara (langsung, tanpa "Bahasa dan masukan").',
+              'One UI 6.1（Android 14）：设置 → 常规管理 → 文字转语音（直接入口，无需“语言和输入”）。',
+            ),
+            style: TextStyle(color: colors.onSurfaceVariant, height: 1.4),
+          ),
+          const SizedBox(height: 12),
+          ..._steps(
+            context,
+            [
+              t(
+                'Open Settings → Apps.',
+                'Buka Pengaturan → Aplikasi.',
+                '打开 设置 → 应用。',
+              ),
+              t(
+                'Find and open Speech Services by Google.',
+                'Cari dan buka Layanan Ucapan oleh Google.',
+                '找到并打开 Speech Services by Google。',
+              ),
+              t(
+                'Tap Install voice data (or Offline speech recognition).',
+                'Ketuk Instal data suara (atau Pengenalan ucapan offline).',
+                '点击 安装语音数据（或离线语音识别）。',
+              ),
+              t(
+                'Download Indonesia, 中文 (Mandarin), and English.',
+                'Unduh: Indonesia, 中文 (Mandarin China), dan English.',
+                '下载：印尼语、中文（普通话）和英语。',
+              ),
+              t(
+                'Return to TalkBridge and tap the speaker icon to test.',
+                'Kembali ke TalkBridge → ketuk ikon speaker (🔊) untuk uji suara.',
+                '返回 TalkBridge，点击扬声器图标测试。',
+              ),
+            ],
+          ),
+          const SizedBox(height: 24),
+          Text(
+            t('Samsung — alternative paths', 'Samsung — jalur alternatif', '三星手机 — 其他路径'),
+            style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            t(
+              'Menu names differ by One UI version. Use Settings search if needed.',
+              'Nama menu beda tiap versi One UI. Gunakan pencarian di Pengaturan jika perlu.',
+              '不同 One UI 版本菜单名称不同。可在设置中搜索。',
+            ),
+            style: TextStyle(color: colors.onSurfaceVariant, height: 1.4),
+          ),
+          const SizedBox(height: 12),
+          ..._steps(
+            context,
+            [
+              t(
+                'Settings search: type "text to speech" or "teks menjadi suara".',
+                'Di Pengaturan, ketik di kolom cari: "teks menjadi suara" atau "text to speech".',
+                '在设置搜索框输入：“文字转语音”或“text to speech”。',
+              ),
+              t(
+                'Path A (One UI 6.1): General management → Text-to-speech.',
+                'Jalur A (One UI 6.1): Manajemen umum → Ubah teks menjadi suara.',
+                '路径 A（One UI 6.1）：常规管理 → 文字转语音。',
+              ),
+              t(
+                'Under Preferred engine, choose Speech Services by Google.',
+                'Pada Mesin yang disukai, pilih Layanan Ucapan oleh Google.',
+                '在首选引擎中选择 Speech Services by Google。',
+              ),
+              t(
+                'Tap gear icon next to engine → Install voice data.',
+                'Ketuk ikon roda gigi (⚙) di samping mesin → Instal data suara.',
+                '点击引擎旁的齿轮图标 → 安装语音数据。',
+              ),
+              t(
+                'Path B: Accessibility → Installed apps → Speech Services by Google.',
+                'Jalur B: Aksesibilitas → Aplikasi terinstal → Layanan Ucapan oleh Google.',
+                '路径 B：无障碍 → 已安装的应用 → Speech Services by Google。',
+              ),
+            ],
+          ),
+          const SizedBox(height: 24),
+          Text(
+            t('Other Android phones', 'HP Android lainnya', '其他安卓手机'),
+            style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 12),
+          ..._steps(
+            context,
+            [
+              t(
+                'Open Settings → Apps → Speech Services by Google.',
+                'Buka Settings → Apps → Speech Services by Google.',
+                '打开 设置 → 应用 → Speech Services by Google。',
+              ),
+              t(
+                'Open the app → Install voice data (or Offline speech).',
+                'Buka aplikasi → Install voice data (atau Offline speech).',
+                '打开应用 → 安装语音数据（或离线语音）。',
+              ),
+              t(
+                'Download Indonesia, 中文, and English voice packs.',
+                'Unduh paket suara Indonesia, 中文, dan English.',
+                '下载印尼语、中文和英语语音包。',
+              ),
+            ],
+          ),
+          const SizedBox(height: 24),
+          Text(
+            t('Tips', 'Tips', '提示'),
+            style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 12),
+          _tip(
+            context,
+            t(
+              'Turn off "Auto Play Translation" in Settings if you only need text.',
+              'Matikan "Putar Terjemahan Otomatis" di Pengaturan jika cukup baca teks saja.',
+              '如果只需要文字，可在设置中关闭“自动播放翻译”。',
+            ),
+          ),
+          _tip(
+            context,
+            t(
+              'Check phone volume and silent mode before testing TTS.',
+              'Cek volume HP dan mode senyap sebelum uji suara.',
+              '测试前请检查手机音量和静音模式。',
+            ),
+          ),
+          _tip(
+            context,
+            t(
+              'Chinese voice pack is required for 中文 translation audio.',
+              'Paket suara 中文 wajib untuk audio terjemahan ke Mandarin.',
+              '中文语音包是播放中文翻译所必需的。',
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  List<Widget> _steps(BuildContext context, List<String> items) {
+    final colors = Theme.of(context).colorScheme;
+    return List.generate(items.length, (i) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            CircleAvatar(
+              radius: 14,
+              backgroundColor: colors.primary,
+              child: Text(
+                '${i + 1}',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                  color: colors.onPrimary,
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                items[i],
+                style: const TextStyle(height: 1.45, fontSize: 15),
+              ),
+            ),
+          ],
+        ),
+      );
+    });
+  }
+
+  Widget _tip(BuildContext context, String text) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.lightbulb_outline, size: 18, color: Colors.amber.shade700),
+          const SizedBox(width: 10),
+          Expanded(child: Text(text, style: const TextStyle(height: 1.45))),
+        ],
       ),
     );
   }

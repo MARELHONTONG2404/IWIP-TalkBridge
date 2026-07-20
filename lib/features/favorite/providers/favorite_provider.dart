@@ -1,13 +1,16 @@
-import 'dart:convert';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:isar_community/isar.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
 import '../../../core/data/iwip_hse_phrases.dart';
+import '../../../core/database/collections/favorite_record.dart';
+import '../../../core/database/isar_provider.dart';
 import '../../settings/providers/settings_provider.dart';
 
 class FavoriteItem {
   final String id;
-  final String sourceLang; // e.g. "English" or "en"
-  final String targetLang; // e.g. "Indonesian" or "id"
+  final String sourceLang;
+  final String targetLang;
   final String originalText;
   final String translatedText;
   final DateTime timestamp;
@@ -21,47 +24,43 @@ class FavoriteItem {
     required this.timestamp,
   });
 
-  Map<String, dynamic> toJson() => {
-        'id': id,
-        'sourceLang': sourceLang,
-        'targetLang': targetLang,
-        'originalText': originalText,
-        'translatedText': translatedText,
-        'timestamp': timestamp.toIso8601String(),
-      };
-
-  factory FavoriteItem.fromJson(Map<String, dynamic> json) => FavoriteItem(
-        id: json['id'],
-        sourceLang: json['sourceLang'],
-        targetLang: json['targetLang'],
-        originalText: json['originalText'],
-        translatedText: json['translatedText'],
-        timestamp: DateTime.parse(json['timestamp']),
+  factory FavoriteItem.fromRecord(FavoriteRecord record) => FavoriteItem(
+        id: record.recordId,
+        sourceLang: record.sourceLang,
+        targetLang: record.targetLang,
+        originalText: record.originalText,
+        translatedText: record.translatedText,
+        timestamp: record.timestamp,
       );
 }
 
 class FavoriteNotifier extends StateNotifier<List<FavoriteItem>> {
+  final Isar _isar;
   final SharedPreferences _prefs;
-  static const String _key = 'translation_favorites';
   static const String _seedKey = 'iwip_hse_phrases_seeded_v1';
 
-  FavoriteNotifier(this._prefs) : super([]) {
+  FavoriteNotifier(this._isar, this._prefs) : super([]) {
+    // ignore: discarded_futures
     _loadFavorites();
   }
 
-  void _loadFavorites() {
-    final list = _prefs.getStringList(_key);
-    if (list != null && list.isNotEmpty) {
-      state = list.map((item) => FavoriteItem.fromJson(jsonDecode(item))).toList();
+  Future<void> _loadFavorites() async {
+    final records = await _isar.favoriteRecords
+        .where()
+        .sortByTimestampDesc()
+        .findAll();
+
+    if (records.isNotEmpty) {
+      state = records.map(FavoriteItem.fromRecord).toList();
       return;
     }
-    // First install / empty: seed frasa HSE IWIP sekali saja.
+
     if (_prefs.getBool(_seedKey) != true) {
-      _seedHsePhrasesSync();
+      await _seedHsePhrases();
     }
   }
 
-  void _seedHsePhrasesSync() {
+  Future<void> _seedHsePhrases() async {
     final seeded = kIwipHsePhrases
         .map(
           (p) => FavoriteItem(
@@ -74,16 +73,20 @@ class FavoriteNotifier extends StateNotifier<List<FavoriteItem>> {
           ),
         )
         .toList();
+
+    await _isar.writeTxn(() async {
+      for (final item in seeded) {
+        await _isar.favoriteRecords.putByRecordId(_toRecord(item));
+      }
+    });
+
+    await _prefs.setBool(_seedKey, true);
     state = seeded;
-    _prefs.setBool(_seedKey, true);
-    // Fire-and-forget persist; load path is sync constructor.
-    // ignore: discarded_futures
-    _saveToPrefs();
   }
 
-  /// Muat ulang frasa HSE tanpa menghapus favorit user yang sudah ada.
   Future<void> ensureHsePhrases() async {
-    final existing = state.map((e) => e.originalText.trim().toLowerCase()).toSet();
+    final existing =
+        state.map((e) => e.originalText.trim().toLowerCase()).toSet();
     final toAdd = <FavoriteItem>[];
     for (final p in kIwipHsePhrases) {
       if (existing.contains(p.idText.trim().toLowerCase())) continue;
@@ -99,9 +102,15 @@ class FavoriteNotifier extends StateNotifier<List<FavoriteItem>> {
       );
     }
     if (toAdd.isEmpty) return;
-    state = [...toAdd, ...state];
+
+    await _isar.writeTxn(() async {
+      for (final item in toAdd) {
+        await _isar.favoriteRecords.putByRecordId(_toRecord(item));
+      }
+    });
+
     await _prefs.setBool(_seedKey, true);
-    await _saveToPrefs();
+    state = [...toAdd, ...state];
   }
 
   Future<void> addFavorite({
@@ -110,6 +119,15 @@ class FavoriteNotifier extends StateNotifier<List<FavoriteItem>> {
     required String originalText,
     required String translatedText,
   }) async {
+    final exists = state.any(
+      (item) =>
+          item.originalText.trim().toLowerCase() ==
+              originalText.trim().toLowerCase() &&
+          item.translatedText.trim().toLowerCase() ==
+              translatedText.trim().toLowerCase(),
+    );
+    if (exists) return;
+
     final newItem = FavoriteItem(
       id: DateTime.now().millisecondsSinceEpoch.toString(),
       sourceLang: sourceLang,
@@ -119,21 +137,22 @@ class FavoriteNotifier extends StateNotifier<List<FavoriteItem>> {
       timestamp: DateTime.now(),
     );
 
-    // Prevent duplicates
-    final exists = state.any((item) =>
-        item.originalText.trim().toLowerCase() == originalText.trim().toLowerCase() &&
-        item.translatedText.trim().toLowerCase() == translatedText.trim().toLowerCase());
-    
-    if (exists) return;
+    await _isar.writeTxn(() async {
+      await _isar.favoriteRecords.putByRecordId(_toRecord(newItem));
+    });
 
-    final newState = [newItem, ...state];
-    state = newState;
-    await _saveToPrefs();
+    state = [newItem, ...state];
   }
 
   Future<void> removeFavorite(String id) async {
+    await _isar.writeTxn(() async {
+      final record =
+          await _isar.favoriteRecords.filter().recordIdEqualTo(id).findFirst();
+      if (record != null) {
+        await _isar.favoriteRecords.delete(record.id);
+      }
+    });
     state = state.where((item) => item.id != id).toList();
-    await _saveToPrefs();
   }
 
   Future<void> toggleFavorite({
@@ -142,9 +161,13 @@ class FavoriteNotifier extends StateNotifier<List<FavoriteItem>> {
     required String originalText,
     required String translatedText,
   }) async {
-    final existingIndex = state.indexWhere((item) =>
-        item.originalText.trim().toLowerCase() == originalText.trim().toLowerCase() &&
-        item.translatedText.trim().toLowerCase() == translatedText.trim().toLowerCase());
+    final existingIndex = state.indexWhere(
+      (item) =>
+          item.originalText.trim().toLowerCase() ==
+              originalText.trim().toLowerCase() &&
+          item.translatedText.trim().toLowerCase() ==
+              translatedText.trim().toLowerCase(),
+    );
 
     if (existingIndex >= 0) {
       await removeFavorite(state[existingIndex].id);
@@ -159,23 +182,36 @@ class FavoriteNotifier extends StateNotifier<List<FavoriteItem>> {
   }
 
   bool isFavorite(String originalText, String translatedText) {
-    return state.any((item) =>
-        item.originalText.trim().toLowerCase() == originalText.trim().toLowerCase() &&
-        item.translatedText.trim().toLowerCase() == translatedText.trim().toLowerCase());
+    return state.any(
+      (item) =>
+          item.originalText.trim().toLowerCase() ==
+              originalText.trim().toLowerCase() &&
+          item.translatedText.trim().toLowerCase() ==
+              translatedText.trim().toLowerCase(),
+    );
   }
 
   Future<void> clearAll() async {
+    await _isar.writeTxn(() async {
+      await _isar.favoriteRecords.clear();
+    });
     state = [];
-    await _prefs.remove(_key);
   }
 
-  Future<void> _saveToPrefs() async {
-    final list = state.map((item) => jsonEncode(item.toJson())).toList();
-    await _prefs.setStringList(_key, list);
+  FavoriteRecord _toRecord(FavoriteItem item) {
+    return FavoriteRecord()
+      ..recordId = item.id
+      ..sourceLang = item.sourceLang
+      ..targetLang = item.targetLang
+      ..originalText = item.originalText
+      ..translatedText = item.translatedText
+      ..timestamp = item.timestamp;
   }
 }
 
-final favoriteProvider = StateNotifierProvider<FavoriteNotifier, List<FavoriteItem>>((ref) {
+final favoriteProvider =
+    StateNotifierProvider<FavoriteNotifier, List<FavoriteItem>>((ref) {
+  final isar = ref.watch(isarProvider);
   final prefs = ref.watch(sharedPreferencesProvider);
-  return FavoriteNotifier(prefs);
+  return FavoriteNotifier(isar, prefs);
 });

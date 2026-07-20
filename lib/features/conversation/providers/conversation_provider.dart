@@ -318,10 +318,6 @@ class ConversationNotifier extends StateNotifier<ConversationState> {
     var fromCode = state.sourceLanguage.code;
     if (detectSource) {
       fromCode = await _resolveSourceLanguage(raw);
-      final detected = languageByCode(fromCode);
-      if (detected.code != state.sourceLanguage.code) {
-        state = state.copyWith(sourceLanguage: detected);
-      }
     }
 
     final glossaryNormalized =
@@ -387,7 +383,6 @@ class ConversationNotifier extends StateNotifier<ConversationState> {
         speakerText: sourceText,
         translatedText: translated,
         isSpeakerDraft: false,
-        targetLanguage: languageByCode(toCode),
       );
 
       _pushCard(

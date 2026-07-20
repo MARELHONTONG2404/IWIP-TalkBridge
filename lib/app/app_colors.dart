@@ -35,4 +35,17 @@ abstract final class AppColors {
   ];
 
   static const statColors = [sky, mint, violet];
+
+  // Colors for Translate Page (Minimalist)
+  static const translateBg = Color(0xFFF8F9FA);
+  static const cardBg = Colors.white;
+  static const textPrimary = Color(0xFF1F2937);
+  static const textMuted = Color(0xFF6B7280);
+  static const accentBlue = Color(0xFF3B82F6);
+  static const accentRed = Color(0xFFEF4444);
+  static const divider = Color(0xFFE5E7EB);
+  static const pillBg = Color(0xFF1F2937); // Tambahkan warna untuk pill button
+  static const card = Colors.white; // Tambahkan warna untuk card
+  static const cardElevated = Color(0xFFF3F4F6); // Tambahkan warna untuk card elevated
 }
+

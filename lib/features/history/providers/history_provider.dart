@@ -1,12 +1,12 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../settings/providers/settings_provider.dart';
+import '../../../core/database/isar_provider.dart';
 import '../data/repositories/history_repository_impl.dart';
 import '../domain/entities/history_item.dart';
 import '../domain/repositories/history_repository.dart';
 
 final historyRepositoryProvider = Provider<HistoryRepository>((ref) {
-  final prefs = ref.watch(sharedPreferencesProvider);
-  return HistoryRepositoryImpl(prefs);
+  final isar = ref.watch(isarProvider);
+  return HistoryRepositoryImpl(isar);
 });
 
 final historyListProvider = StateNotifierProvider<HistoryNotifier, AsyncValue<List<HistoryItem>>>((ref) {

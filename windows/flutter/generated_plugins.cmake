@@ -5,6 +5,7 @@
 list(APPEND FLUTTER_PLUGIN_LIST
   file_selector_windows
   flutter_tts
+  isar_community_flutter_libs
   permission_handler_windows
   share_plus
   speech_to_text_windows
