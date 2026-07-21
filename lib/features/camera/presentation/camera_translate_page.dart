@@ -338,7 +338,7 @@ class _CameraTranslatePageState extends ConsumerState<CameraTranslatePage> {
         _ => _targetLang.code,
       };
       unawaited(
-        _ttsService.speak(result, languageCode: ttsCode).catchError((_) {}),
+        _ttsService.speak(result, languageCode: ttsCode).catchError((_) => false),
       );
     } catch (_) {
       if (mounted) {

@@ -489,9 +489,20 @@ class SpeechService {
     final confidence = result.confidence;
     final hasRating = result.hasConfidenceRating;
 
-    // Partial: toleran. Final berkepuasan rendah tetap dikirim; UI tolak translate.
+    // Partial result: filter ketat agar tidak men-trigger translate terlalu dini.
+    // - Confidence < 0.40 untuk partial = tebakan STT; skip untuk hemat akurasi.
+    // - Partial dengan < 2 kata sangat rentan salah; tunggu lebih banyak kata.
     if (!result.finalResult) {
-      if (hasRating && confidence > 0 && confidence < 0.05) {
+      final wordCount = processed.trim().split(RegExp(r'\s+')).length;
+      if (wordCount < 2) return;
+      if (hasRating && confidence > 0 && confidence < 0.40) {
+        return;
+      }
+    }
+
+    // Final result: filter hanya jika confidence benar-benar sangat rendah (< 0.10).
+    if (result.finalResult) {
+      if (hasRating && confidence > 0 && confidence < 0.10) {
         return;
       }
     }

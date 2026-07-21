@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 
 import 'translation_text_processor.dart';
 import 'language_detector.dart';
+import 'iwip_glossary_processor.dart';
 
 void _log(String message) {
   if (kDebugMode) debugPrint(message);
@@ -114,19 +115,25 @@ class TranslationService {
     required String from,
     required String to,
   }) async {
-    final input = TranslationTextProcessor.prepare(text, from);
+    var input = TranslationTextProcessor.prepare(text, from);
     if (input.isEmpty) return '';
 
     if (from == to) return input;
 
+    String result;
     if (input.length > _chunkSize) {
        _log(
         '[Translation API] chunking ${input.length} chars into parts of ~$_chunkSize',
       );
-      return _translateChunked(input, from, to);
+      result = await _translateChunked(input, from, to);
+    } else {
+      result = await _translateWithRetry(input, from, to);
     }
-
-    return _translateWithRetry(input, from, to);
+    
+    // Koreksi glosarium pasca-terjemahan
+    result = IwipGlossaryProcessor.postProcessGlossary(result, to);
+    
+    return result.replaceAll(RegExp(r'\s+'), ' ').trim();
   }
 
   Future<String> _translateChunked(
@@ -334,16 +341,28 @@ class TranslationService {
     String from,
     String to,
   ) {
-    final normalizedSource = source.trim().toLowerCase();
-    final normalizedTranslated = translated.trim().toLowerCase();
+    String normalize(String text) {
+      return text
+          .replaceAll(RegExp(r'[^\w\s\u4e00-\u9fff]'), '')
+          .replaceAll(RegExp(r'\s+'), ' ')
+          .trim()
+          .toLowerCase();
+    }
+    
+    final normalizedSource = normalize(source);
+    final normalizedTranslated = normalize(translated);
 
     if (normalizedTranslated.isEmpty) return false;
-    if (normalizedTranslated.contains('MYMEMORY WARNING')) return false;
+    if (translated.toUpperCase().contains('MYMEMORY WARNING')) return false;
 
-    if (from != to &&
-        normalizedSource == normalizedTranslated &&
-        !_isSameScript(source, translated)) {
-      return false;
+    if (from != to && normalizedSource == normalizedTranslated) {
+      // Jika hasil terjemahan sama persis dengan sumber (setelah normalisasi)
+      // dan bukan bahasa yang sama, maka ini kemungkinan besar kegagalan provider,
+      // KECUALI hanya terdiri dari 1 kata (bisa jadi memang tidak ada terjemahannya, mis. nama tempat).
+      final wordCount = normalizedSource.split(' ').length;
+      if (wordCount > 1 || !_isSameScript(source, translated)) {
+        return false;
+      }
     }
 
     return true;

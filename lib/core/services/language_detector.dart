@@ -6,20 +6,16 @@ class LanguageDetector {
   static final _cjk = RegExp(r'[\u4e00-\u9fff]');
   static final _latinWord = RegExp(r'[A-Za-zÀ-ž]+');
 
-  static const _idMarkers = {
+  // ── Marker Indonesia ──────────────────────────────────────────────────────
+  // Kata-kata yang sangat khas Indonesia (bobot 2) — hampir tidak pernah
+  // muncul dalam kalimat Inggris.
+  static const _idStrongMarkers = {
     'yang',
-    'dan',
     'dengan',
     'untuk',
     'tidak',
-    'ada',
-    'ini',
-    'itu',
     'dari',
-    'ke',
-    'di',
     'sudah',
-    'bisa',
     'akan',
     'kami',
     'kita',
@@ -27,63 +23,120 @@ class LanguageDetector {
     'saya',
     'tolong',
     'selamat',
-    'apa',
     'bagaimana',
     'mengapa',
     'karena',
     'tetapi',
-    'atau',
     'juga',
-    'hari',
-    'kerja',
     'silakan',
     'mohon',
     'segera',
-    'area',
+    'belum',
+    'jangan',
+    'pakai',
+    'masuk',
+    'keluar',
+    'boleh',
+    'harus',
+    'sedang',
+    'pernah',
+    'saja',
     'bahaya',
+    'nikel',
+    'izin',
+    'pelindung',
+  };
+
+  // Kata Indonesia yang lebih umum (bobot 1) — bisa overlap dengan bahasa lain
+  // tapi tetap indikator berguna.
+  static const _idWeakMarkers = {
+    'dan',
+    'ada',
+    'ini',
+    'itu',
+    'ke',
+    'di',
+    'bisa',
+    'apa',
+    'atau',
+    'hari',
+    'kerja',
+    'lagi',
+    'sini',
+    'situ',
+    'mana',
+    'dekat',
+    'jauh',
     'konveyor',
     'pengeboran',
     'peledakan',
     'bijih',
-    'nikel',
     'smelter',
     'tungku',
     'helm',
-    'izin',
     'titik',
     'kumpul',
-    'pelindung',
   };
 
-  static const _enMarkers = {
+  // ── Marker English ────────────────────────────────────────────────────────
+  // Kata-kata yang sangat khas Inggris (bobot 2).
+  static const _enStrongMarkers = {
     'the',
+    'was',
+    'were',
+    'have',
+    'has',
+    'been',
+    'would',
+    'could',
+    'should',
+    'please',
+    'because',
+    'there',
+    'where',
+    'when',
+    'what',
+    'they',
+    'their',
+    'these',
+    'those',
+    'which',
+    'about',
+    'into',
+    'safety',
+    'danger',
+    'hazard',
+    'permit',
+    'nickel',
+    'furnace',
+    'helmet',
+  };
+
+  // Kata Inggris yang lebih umum (bobot 1).
+  static const _enWeakMarkers = {
     'and',
     'with',
     'for',
     'this',
     'that',
     'from',
-    'have',
-    'has',
     'are',
-    'was',
-    'were',
-    'please',
-    'what',
-    'how',
-    'why',
-    'because',
     'but',
     'or',
     'also',
     'you',
     'we',
-    'they',
     'need',
     'work',
-    'safety',
-    'danger',
-    'area',
+    'how',
+    'why',
+    'can',
+    'will',
+    'must',
+    'here',
+    'done',
+    'make',
+    'take',
     'crusher',
     'conveyor',
     'stockpile',
@@ -91,11 +144,6 @@ class LanguageDetector {
     'drilling',
     'excavator',
     'blasting',
-    'nickel',
-    'furnace',
-    'helmet',
-    'hazard',
-    'permit',
   };
 
   /// Mengembalikan kode bahasa (`id`/`en`/`zh`/…) atau `null` jika tidak yakin.
@@ -116,20 +164,32 @@ class LanguageDetector {
         .toList();
     if (words.isEmpty) return null;
 
+    // Weighted scoring: strong marker = 2 poin, weak marker = 1 poin.
     var idScore = 0;
     var enScore = 0;
     for (final w in words) {
-      if (_idMarkers.contains(w)) idScore++;
-      if (_enMarkers.contains(w)) enScore++;
+      if (_idStrongMarkers.contains(w)) {
+        idScore += 2;
+      } else if (_idWeakMarkers.contains(w)) {
+        idScore += 1;
+      }
+      if (_enStrongMarkers.contains(w)) {
+        enScore += 2;
+      } else if (_enWeakMarkers.contains(w)) {
+        enScore += 1;
+      }
     }
 
     if (idScore == 0 && enScore == 0) {
       // Banyak kata Latin tanpa marker kuat → default Inggris lebih aman untuk STT online.
       return words.length >= 3 ? 'en' : null;
     }
-    if (idScore >= enScore + 1) return 'id';
-    if (enScore >= idScore + 1) return 'en';
-    if (idScore > 0 && idScore == enScore) return 'id';
+    // Butuh selisih minimal 2 poin agar yakin; jika seri atau selisih 1,
+    // prioritaskan Indonesia (konteks IWIP = site Indonesia).
+    if (idScore >= enScore + 2) return 'id';
+    if (enScore >= idScore + 2) return 'en';
+    // Selisih kecil / seri → default Indonesia (konteks site IWIP).
+    if (idScore > 0) return 'id';
     return enScore > 0 ? 'en' : 'id';
   }
 }

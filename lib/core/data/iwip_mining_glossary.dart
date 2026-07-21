@@ -5,6 +5,8 @@ class MiningGlossaryEntry {
   final String zh;
   final List<String> idVariants;
   final List<String> enVariants;
+  final List<String> zhVariants;
+  final List<String> wrongTranslations;
 
   const MiningGlossaryEntry({
     required this.id,
@@ -12,6 +14,8 @@ class MiningGlossaryEntry {
     required this.zh,
     this.idVariants = const [],
     this.enVariants = const [],
+    this.zhVariants = const [],
+    this.wrongTranslations = const [],
   });
 }
 
@@ -148,5 +152,120 @@ const List<MiningGlossaryEntry> kIwipMiningGlossary = [
     zh: '工作许可证',
     idVariants: ['izin kerja', 'surat izin kerja'],
     enVariants: ['work permit', 'ptw'],
+  ),
+
+  // ─── IT / Tech Glossary (context-safe, jangan paksa ganti) ───────────────
+  MiningGlossaryEntry(
+    id: 'aplikasi',
+    en: 'application',
+    zh: '应用程序',
+    idVariants: ['app', 'apk', 'apl'],
+    enVariants: ['app', 'software', 'program'],
+    wrongTranslations: ['permohonan', 'lamaran', '申请', 'apply', 'request'],
+  ),
+  MiningGlossaryEntry(
+    id: 'sistem',
+    en: 'system',
+    zh: '系统',
+    idVariants: ['sistim'],
+    enVariants: ['systems'],
+  ),
+  MiningGlossaryEntry(
+    id: 'server',
+    en: 'server',
+    zh: '服务器',
+    idVariants: ['serfer', 'sevfer'],
+    enVariants: ['servers', 'backend server'],
+  ),
+  MiningGlossaryEntry(
+    id: 'database',
+    en: 'database',
+    zh: '数据库',
+    idVariants: ['data base', 'basis data', 'db'],
+    enVariants: ['db', 'data storage'],
+  ),
+  MiningGlossaryEntry(
+    id: 'Flutter',
+    en: 'Flutter',
+    zh: 'Flutter',
+    idVariants: ['flutter', 'fluter'],
+    enVariants: ['flutter framework'],
+  ),
+  MiningGlossaryEntry(
+    id: 'Android',
+    en: 'Android',
+    zh: 'Android',
+    idVariants: ['android', 'androit'],
+    enVariants: ['android os'],
+  ),
+  MiningGlossaryEntry(
+    id: 'GitHub',
+    en: 'GitHub',
+    zh: 'GitHub',
+    idVariants: ['github', 'git hub', 'git'],
+    enVariants: ['git hub', 'github repo'],
+  ),
+  MiningGlossaryEntry(
+    id: 'repository',
+    en: 'repository',
+    zh: '代码仓库',
+    idVariants: ['repositori', 'repo'],
+    enVariants: ['repo', 'code repository'],
+  ),
+  MiningGlossaryEntry(
+    id: 'AI',
+    en: 'AI',
+    zh: '人工智能',
+    idVariants: ['kecerdasan buatan', 'ai', 'artificial intelligence'],
+    enVariants: ['artificial intelligence', 'machine learning'],
+  ),
+  MiningGlossaryEntry(
+    id: 'terjemahan',
+    en: 'translation',
+    zh: '翻译',
+    idVariants: ['translasi', 'translate'],
+    enVariants: ['translate', 'translations'],
+  ),
+  MiningGlossaryEntry(
+    id: 'coding',
+    en: 'coding',
+    zh: '编程',
+    idVariants: ['koding', 'pemrograman', 'programing'],
+    enVariants: ['programming', 'code', 'software development'],
+  ),
+  MiningGlossaryEntry(
+    id: 'proyek',
+    en: 'project',
+    zh: '项目',
+    idVariants: ['project', 'proyect'],
+    enVariants: ['projects'],
+  ),
+  MiningGlossaryEntry(
+    id: 'jaringan',
+    en: 'network',
+    zh: '网络',
+    idVariants: ['network', 'netwok'],
+    enVariants: ['networks', 'networking'],
+  ),
+  MiningGlossaryEntry(
+    id: 'perangkat lunak',
+    en: 'software',
+    zh: '软件',
+    idVariants: ['software', 'sofware'],
+    enVariants: ['softwares'],
+  ),
+  MiningGlossaryEntry(
+    id: 'perangkat keras',
+    en: 'hardware',
+    zh: '硬件',
+    idVariants: ['hardware', 'hardwer'],
+    enVariants: ['hardwares'],
+  ),
+  MiningGlossaryEntry(
+    id: 'API',
+    en: 'API',
+    zh: 'API',
+    idVariants: ['api', 'a.p.i'],
+    enVariants: ['api endpoint', 'application programming interface'],
   ),
 ];

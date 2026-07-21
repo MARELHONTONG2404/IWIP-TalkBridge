@@ -23,8 +23,14 @@ class TranslationTextProcessor {
 
     if (_looksUnsafe(text)) return '';
 
-    text = _normalizePunctuation(text);
+    // Normalisasi bahasa (slang, dsb)
     text = _applyLanguageNormalizations(text, languageCode);
+    
+    // Perjelas kata-kata multi-makna (polysemy) dengan sinonim eksplisit
+    // agar mesin terjemahan menangkap konteks IT/Tambang secara akurat.
+    text = _disambiguatePolysemy(text, languageCode);
+    
+    text = _normalizePunctuation(text);
 
     return text.trim();
   }
@@ -77,7 +83,7 @@ class TranslationTextProcessor {
       case 'id':
         return _normalizeIndonesian(text);
       case 'en':
-        return _normalizeEnglish(text);
+        return _expandEnglishContractions(text);
       default:
         return text;
     }
@@ -86,22 +92,22 @@ class TranslationTextProcessor {
   static String _normalizeIndonesian(String text) {
     var normalized = text;
 
+    // PENTING: Gunakan word-boundary (\b) pada SEMUA penggantian agar
+    // tidak menimpa substring di tengah kata.
+    // Contoh bug sebelumnya: "ga " → "tidak " bisa merusak "agar" → "tidakr"
+    // Hanya ganti kata slang yang sangat umum & tidak ambigu.
     const replacements = <String, String>{
+      // ── Kata informal → formal ─────────────────────────────────────────
       'gimana': 'bagaimana',
       'gmna': 'bagaimana',
       'gmn': 'bagaimana',
       'nggak': 'tidak',
       'gak': 'tidak',
-      'ga ': 'tidak ',
       'gk': 'tidak',
       'udah': 'sudah',
       'udh': 'sudah',
       'blm': 'belum',
       'belom': 'belum',
-      'bgt': 'sangat',
-      'banget': 'sangat',
-      'bener': 'benar',
-      'beneran': 'benar',
       'kalo': 'kalau',
       'dgn': 'dengan',
       'dpt': 'dapat',
@@ -118,15 +124,38 @@ class TranslationTextProcessor {
       'makasih': 'terima kasih',
       'trimakasih': 'terima kasih',
       'terimakasih': 'terima kasih',
+      // ── Singkatan STT umum ──────────────────────────────────────────────
+      'knp': 'kenapa',
+      'brp': 'berapa',
+      'jgn': 'jangan',
+      'krn': 'karena',
+      'tp': 'tapi',
+      'sm': 'sama',
+      'sblm': 'sebelum',
+      'stlh': 'setelah',
+      'bs': 'bisa',
+      'tdk': 'tidak',
+      'sdh': 'sudah',
+      'blh': 'boleh',
+      'dlm': 'dalam',
+      'dr': 'dari',
+      'utk': 'untuk',
+      'krj': 'kerja',
+      // ── Sapaan salah ejaan ──────────────────────────────────────────────
       'salamat pagi': 'Selamat pagi',
       'salamat siang': 'Selamat siang',
       'salamat sore': 'Selamat sore',
       'salamat malam': 'Selamat malam',
     };
 
+    // CATATAN: "bgt"→"sangat" dan "banget"→"sangat" dihapus karena terlalu
+    // agresif dan bisa mengubah nuansa kalimat. Demikian pula "bener"→"benar",
+    // "ga "→"tidak " (tanpa boundary) dan beberapa lainnya.
+
     for (final entry in replacements.entries) {
       normalized = normalized.replaceAll(
-        RegExp('\\b${RegExp.escape(entry.key)}\\b', caseSensitive: false),
+        // Gunakan word-boundary eksplisit untuk setiap penggantian
+        RegExp(r'\b' + RegExp.escape(entry.key) + r'\b', caseSensitive: false),
         entry.value,
       );
     }
@@ -134,34 +163,147 @@ class TranslationTextProcessor {
     return normalized;
   }
 
-  static String _normalizeEnglish(String text) {
-    var normalized = text;
-
+  static String _expandEnglishContractions(String text) {
+    var expanded = text;
     const contractions = <String, String>{
-      "don't": 'do not',
-      "doesn't": 'does not',
-      "didn't": 'did not',
-      "can't": 'cannot',
-      "won't": 'will not',
-      "i'm": 'I am',
-      "you're": 'you are',
-      "we're": 'we are',
-      "they're": 'they are',
-      "it's": 'it is',
-      "that's": 'that is',
-      "what's": 'what is',
-      "i've": 'I have',
-      "i'll": 'I will',
-      "i'd": 'I would',
+      "don't": "do not",
+      "Don't": "Do not",
+      "doesn't": "does not",
+      "Doesn't": "Does not",
+      "didn't": "did not",
+      "Didn't": "Did not",
+      "won't": "will not",
+      "Won't": "Will not",
+      "can't": "cannot",
+      "Can't": "Cannot",
+      "wasn't": "was not",
+      "Wasn't": "Was not",
+      "weren't": "were not",
+      "Weren't": "Were not",
+      "isn't": "is not",
+      "Isn't": "Is not",
+      "aren't": "are not",
+      "Aren't": "Are not",
+      "haven't": "have not",
+      "Haven't": "Have not",
+      "hasn't": "has not",
+      "Hasn't": "Has not",
+      "hadn't": "had not",
+      "Hadn't": "Had not",
+      "shouldn't": "should not",
+      "Shouldn't": "Should not",
+      "wouldn't": "would not",
+      "Wouldn't": "Would not",
+      "couldn't": "could not",
+      "Couldn't": "Could not",
+      "mustn't": "must not",
+      "Mustn't": "Must not",
+      "I'm": "I am",
+      "i'm": "i am",
+      "you're": "you are",
+      "You're": "You are",
+      "we're": "we are",
+      "We're": "We are",
+      "they're": "they are",
+      "They're": "They are",
+      "he's": "he is",
+      "He's": "He is",
+      "she's": "she is",
+      "She's": "She is",
+      "it's": "it is",
+      "It's": "It is",
+      "I've": "I have",
+      "you've": "you have",
+      "You've": "You have",
+      "we've": "we have",
+      "We've": "We have",
+      "they've": "they have",
+      "They've": "They have",
+      "I'd": "I would",
+      "you'd": "you would",
+      "You'd": "You would",
+      "we'd": "we would",
+      "We'd": "We would",
+      "they'd": "they would",
+      "They'd": "They would",
+      "he'd": "he would",
+      "He'd": "He would",
+      "she'd": "she would",
+      "She'd": "She would",
+      "I'll": "I will",
+      "you'll": "you will",
+      "You'll": "You will",
+      "we'll": "we will",
+      "We'll": "We will",
+      "they'll": "they will",
+      "They'll": "They will",
+      "he'll": "he will",
+      "He'll": "He will",
+      "she'll": "she will",
+      "She'll": "She will",
+      "it'll": "it will",
+      "It'll": "It will",
+      "that's": "that is",
+      "That's": "That is",
+      "there's": "there is",
+      "There's": "There is",
+      "what's": "what is",
+      "What's": "What is",
+      "who's": "who is",
+      "Who's": "Who is",
+      "let's": "let us",
+      "Let's": "let us",
     };
 
     for (final entry in contractions.entries) {
-      normalized = normalized.replaceAll(
-        RegExp('\\b${RegExp.escape(entry.key)}\\b', caseSensitive: false),
+      expanded = expanded.replaceAll(
+        RegExp(r'\b' + RegExp.escape(entry.key) + r'\b'),
         entry.value,
       );
     }
 
-    return normalized;
+    return expanded;
+  }
+
+  static String _disambiguatePolysemy(String text, String languageCode) {
+    var result = text;
+    
+    if (languageCode == 'id') {
+      // Anchoring arti kata untuk bahasa Indonesia agar diterjemahkan 
+      // dengan benar ke bahasa target (terutama IT & Tambang).
+      final disambiguations = <String, String>{
+        // Kata -> Sinonim yang lebih spesifik agar engine tidak salah menebak
+        'aplikasi': 'program aplikasi', // Mencegah arti "surat lamaran"
+        'project': 'proyek pekerjaan', // Mencegah arti acak
+        'proyek': 'proyek pekerjaan',
+        'account': 'akun pengguna', // Mencegah arti "rekening/laporan"
+        'akun': 'akun pengguna',
+        'database': 'basis data', // 100% selalu diterjemahkan "database"
+        'plant': 'pabrik', // Mencegah arti "tanaman"
+        'mining': 'pertambangan', 
+        'tambang': 'pertambangan',
+        'server': 'server sistem',
+      };
+
+      for (final entry in disambiguations.entries) {
+        result = result.replaceAll(
+          RegExp(r'\b' + RegExp.escape(entry.key) + r'\b', caseSensitive: false),
+          entry.value,
+        );
+      }
+    } else if (languageCode == 'en') {
+      final disambiguations = <String, String>{
+        'application': 'software application',
+        'plant': 'factory plant',
+      };
+      for (final entry in disambiguations.entries) {
+        result = result.replaceAll(
+          RegExp(r'\b' + RegExp.escape(entry.key) + r'\b', caseSensitive: false),
+          entry.value,
+        );
+      }
+    }
+
+    return result;
   }
 }

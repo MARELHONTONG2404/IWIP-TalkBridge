@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../../core/services/iwip_glossary_processor.dart';
+
 import '../../../../core/services/language_detector.dart';
 import '../../../../core/services/offline_translation_service.dart';
 import '../../../../core/services/speech_text_processor.dart';
@@ -170,7 +170,9 @@ class ConversationNotifier extends StateNotifier<ConversationState> {
     translationPlaceholder,
   };
 
-  static const _translateDebounceMs = 800;
+  // 1400ms memberikan waktu STT online menyelesaikan proses final recognition.
+  // Terlalu pendek (800ms) menyebabkan translate dari partial result.
+  static const _translateDebounceMs = 1400;
   static const _homeLanguageCode = 'id';
 
   void toggleTwoWayMode() {
@@ -320,9 +322,7 @@ class ConversationNotifier extends StateNotifier<ConversationState> {
       fromCode = await _resolveSourceLanguage(raw);
     }
 
-    final glossaryNormalized =
-        IwipGlossaryProcessor.normalizeSource(raw, fromCode);
-    final prepared = SpeechTextProcessor.postProcess(glossaryNormalized, fromCode);
+    final prepared = SpeechTextProcessor.postProcess(raw, fromCode);
     final sourceText = TranslationTextProcessor.prepare(prepared, fromCode);
     if (sourceText.isEmpty ||
         !TranslationTextProcessor.isSafeToTranslate(sourceText)) {
@@ -367,13 +367,6 @@ class ConversationNotifier extends StateNotifier<ConversationState> {
     try {
       var translated = await _translateWithOfflineFallback(
         sourceText,
-        from: fromCode,
-        to: toCode,
-      );
-
-      translated = IwipGlossaryProcessor.applyToTranslation(
-        source: sourceText,
-        translated: translated,
         from: fromCode,
         to: toCode,
       );
@@ -452,13 +445,22 @@ class ConversationNotifier extends StateNotifier<ConversationState> {
   }
 
   Future<String> _resolveSourceLanguage(String text) async {
+    final current = state.sourceLanguage.code;
     final local = LanguageDetector.detectLocal(text);
+    
+    // Jika deteksi lokal cukup yakin (punya selisih bobot ≥ 2 seperti 
+    // yang diatur di LanguageDetector), gunakan hasil tersebut.
     if (local != null) return local;
+    
     try {
-      return await _translator.detectLanguage(text);
-    } catch (_) {
-      return state.sourceLanguage.code;
-    }
+      final detected = await _translator.detectLanguage(text);
+      if (detected.isNotEmpty && detected != 'auto') {
+        return detected;
+      }
+    } catch (_) {}
+    
+    // Fallback ke bahasa yang dipilih user
+    return current;
   }
 
   void _pushCard({

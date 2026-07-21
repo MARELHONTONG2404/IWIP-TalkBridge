@@ -93,14 +93,25 @@ class SpeechTextProcessor {
   }
 
   static String _stripFillers(String text, String languageCode) {
-    if (languageCode == 'id') {
+    if (languageCode == 'zh') {
+      // Chinese fillers: 嗯, 啊, 那个, 就是, 然后
       return text
-          .replaceAll(RegExp(r'^(ehm+|emm+|anu)\s+', caseSensitive: false), '')
-          .replaceAll(RegExp(r'\s+(ehm+|emm+|anu)$', caseSensitive: false), '')
+          .replaceAll(RegExp(r'^[嗯啊]+\s*'), '')
+          .replaceAll(RegExp(r'\s*[嗯啊]+$'), '')
+          .replaceAll(RegExp(r'(?<=[\u4e00-\u9fff])\s*那个\s*(?=[\u4e00-\u9fff])'), '')
           .trim();
     }
+    if (languageCode == 'id') {
+      // Hapus filler di awal, akhir, DAN tengah kalimat.
+      return text
+          .replaceAll(RegExp(r'\b(?:ehm+|emm+|anu|eee+)\b', caseSensitive: false), '')
+          .replaceAll(RegExp(r'\s+'), ' ')
+          .trim();
+    }
+    // English / lainnya
     return text
-        .replaceAll(RegExp(r'^(uh+|um+|erm+)\s+', caseSensitive: false), '')
+        .replaceAll(RegExp(r'\b(?:uh+|um+|erm+|uhh+)\b', caseSensitive: false), '')
+        .replaceAll(RegExp(r'\s+'), ' ')
         .trim();
   }
 
@@ -110,26 +121,31 @@ class SpeechTextProcessor {
     // Glosarium site IWIP / PT Weda Bay Nickel (nama & istilah jangan diacak STT).
     final domainFixes = <Pattern, String>{
       RegExp(
-        r'\b(?:i\s*w\s*i\s*p|ewip|iwiip|iwhip)\b',
+        r'\b(?:i\s*w\s*i\s*p|ewip|iwiip|iwhip|eye\s*wipe?|i\s*whip)\b',
         caseSensitive: false,
       ): 'IWIP',
       RegExp(
-        r'\bindonesia\s+(?:weda|widiay|widaya|wida)\s+bay\s+industrial\s+park\b',
+        r'\bindonesia\s+(?:weda|widiay|widaya|wida|wedding)\s+bay\s+industrial\s+park\b',
         caseSensitive: false,
       ): 'Indonesia Weda Bay Industrial Park',
       RegExp(
         r'\b(?:p\.?\s*t\.?|pt|pity|peti|pee\s*tee)\s+'
-        r'(?:weda|widiay|widaya|widiy?a?|widay|weday|veda|weeda|wida)\s+'
+        r'(?:weda|widiay|widaya|widiy?a?|widay|weday|veda|weeda|wida|wedding)\s+'
         r'(?:bay|bali|bye|bei|bai)\s+'
         r'(?:nickel|nikel|nikl|nickle)\b',
         caseSensitive: false,
       ): 'PT Weda Bay Nickel',
       RegExp(
-        r'\b(?:weda|widiay|widaya|widiy?a?|widay|weday|veda|weeda|wida)\s+'
+        r'\b(?:weda|widiay|widaya|widiy?a?|widay|weday|veda|weeda|wida|wedding)\s+'
         r'(?:bay|bali|bye|bei|bai)\s+'
         r'(?:nickel|nikel|nikl|nickle)\b',
         caseSensitive: false,
       ): 'Weda Bay Nickel',
+      // "wedding bay" sering muncul dari STT ketika user bilang "Weda Bay"
+      RegExp(
+        r'\b(?:wedding|weding)\s+(?:bay|bai|bei)\b',
+        caseSensitive: false,
+      ): 'Weda Bay',
       RegExp(
         r'\b(?:halma\s*hera|halmahaera)\b',
         caseSensitive: false,
@@ -147,6 +163,11 @@ class SpeechTextProcessor {
       ): 'alat pelindung diri',
       RegExp(r'\b(?:smelter|smelder|smeltar)\b', caseSensitive: false): 'smelter',
       RegExp(r'\b(?:nikel|nickle)\b', caseSensitive: false): 'nikel',
+      // Koreksi STT umum untuk "talk bridge"
+      RegExp(
+        r'\b(?:talk\s*bridge|talkbridge|tok\s*bridge)\b',
+        caseSensitive: false,
+      ): 'TalkBridge',
     };
 
     for (final entry in domainFixes.entries) {
@@ -190,6 +211,18 @@ class SpeechTextProcessor {
       for (final entry in replacements.entries) {
         fixed = fixed.replaceAll(entry.key, entry.value);
       }
+      return fixed;
+    }
+
+    if (languageCode == 'zh') {
+      // Normalisasi tanda baca full-width yang sering muncul dari STT Chinese.
+      fixed = fixed
+          .replaceAll('，', ', ')
+          .replaceAll('。', '. ')
+          .replaceAll('！', '! ')
+          .replaceAll('？', '? ')
+          .replaceAll(RegExp(r'\s+'), ' ')
+          .trim();
       return fixed;
     }
 

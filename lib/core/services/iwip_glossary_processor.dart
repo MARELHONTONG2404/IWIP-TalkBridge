@@ -4,87 +4,36 @@ import '../data/iwip_mining_glossary.dart';
 class IwipGlossaryProcessor {
   IwipGlossaryProcessor._();
 
-  static String normalizeSource(String text, String languageCode) {
-    var result = text;
-    for (final entry in kIwipMiningGlossary) {
-      result = _replaceVariants(result, entry, languageCode);
-    }
-    return result;
-  }
-
-  static String applyToTranslation({
-    required String source,
-    required String translated,
-    required String from,
-    required String to,
-  }) {
+  /// Melakukan koreksi terhadap hasil terjemahan berdasarkan glosarium.
+  /// Berguna untuk mengganti kata yang sering salah diterjemahkan (mis. "aplikasi" -> "permohonan").
+  static String postProcessGlossary(String translated, String toCode) {
     var result = translated;
+
     for (final entry in kIwipMiningGlossary) {
-      if (!_sourceContainsEntry(source, entry, from)) continue;
-      final expected = _termForLang(entry, to);
-      if (expected.isEmpty) continue;
-      // Pastikan istilah teknis di hasil terjemahan sesuai glosarium IWIP.
-      final wrongForms = _allWrongForms(entry, to);
-      for (final wrong in wrongForms) {
-        if (wrong.isEmpty) continue;
-        result = result.replaceAll(
-          RegExp(RegExp.escape(wrong), caseSensitive: false),
-          expected,
-        );
+      if (entry.wrongTranslations.isEmpty) continue;
+
+      final canonicalTo = _termForLang(entry, toCode);
+      if (canonicalTo.isEmpty) continue;
+
+      for (final wrong in entry.wrongTranslations) {
+        if (wrong.trim().isEmpty) continue;
+
+        // Gunakan word boundary untuk bahasa yang menggunakan spasi (id, en, dll.)
+        // Untuk Mandarin/CJK, word boundary tidak berfungsi dengan cara yang sama, jadi gunakan pencarian langsung.
+        final isCjk = RegExp(r'[\u4e00-\u9fff]').hasMatch(wrong);
+        final pattern = isCjk
+            ? RegExp(RegExp.escape(wrong), caseSensitive: false)
+            : RegExp(r'\b' + RegExp.escape(wrong) + r'\b', caseSensitive: false);
+
+        result = result.replaceAll(pattern, canonicalTo);
       }
     }
+
     return result;
   }
 
-  static String _replaceVariants(
-    String text,
-    MiningGlossaryEntry entry,
-    String lang,
-  ) {
-    var result = text;
-    final canonical = _termForLang(entry, lang);
-    if (canonical.isEmpty) return result;
-
-    final variants = <String>[
-      ...entry.idVariants,
-      ...entry.enVariants,
-      entry.id,
-      entry.en,
-      entry.zh,
-    ];
-
-    for (final variant in variants) {
-      if (variant.toLowerCase() == canonical.toLowerCase()) continue;
-      result = result.replaceAll(
-        RegExp(r'\b' + RegExp.escape(variant) + r'\b', caseSensitive: false),
-        canonical,
-      );
-    }
-    return result;
-  }
-
-  static bool _sourceContainsEntry(
-    String source,
-    MiningGlossaryEntry entry,
-    String from,
-  ) {
-    final terms = <String>[
-      _termForLang(entry, from),
-      ...entry.idVariants,
-      ...entry.enVariants,
-      entry.id,
-      entry.en,
-      entry.zh,
-    ];
-    final lower = source.toLowerCase();
-    for (final t in terms) {
-      if (t.isNotEmpty && lower.contains(t.toLowerCase())) return true;
-    }
-    return false;
-  }
-
-  static String _termForLang(MiningGlossaryEntry entry, String code) {
-    switch (code) {
+  static String _termForLang(MiningGlossaryEntry entry, String lang) {
+    switch (lang) {
       case 'id':
         return entry.id;
       case 'en':
@@ -92,19 +41,7 @@ class IwipGlossaryProcessor {
       case 'zh':
         return entry.zh;
       default:
-        return entry.en;
+        return '';
     }
-  }
-
-  static List<String> _allWrongForms(MiningGlossaryEntry entry, String to) {
-    final expected = _termForLang(entry, to).toLowerCase();
-    final all = <String>[
-      entry.id,
-      entry.en,
-      entry.zh,
-      ...entry.idVariants,
-      ...entry.enVariants,
-    ];
-    return all.where((t) => t.toLowerCase() != expected).toList();
   }
 }

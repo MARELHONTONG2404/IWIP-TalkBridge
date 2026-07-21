@@ -575,7 +575,6 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
 
     return Theme(
       data: Theme.of(context).copyWith(
-        useMaterial3: true,
         brightness: Brightness.dark,
         scaffoldBackgroundColor: AppColors.translateBg,
         colorScheme: ColorScheme.fromSeed(
