@@ -14,6 +14,7 @@ import '../../../../core/services/speech_service.dart';
 import '../../../../core/services/speech_text_processor.dart';
 import '../../../../core/services/tts_service.dart';
 import '../../providers/conversation_provider.dart';
+import '../../domain/entities/interpreter_session_model.dart';
 import '../../../language/data/language_model.dart';
 import '../../../settings/providers/settings_provider.dart';
 import '../../../favorite/providers/favorite_provider.dart';
@@ -25,7 +26,15 @@ void _log(String message) {
 }
 
 class ConversationPage extends ConsumerStatefulWidget {
-  const ConversationPage({super.key});
+  /// Session interpreter opsional.
+  /// Jika diisi, halaman berjalan dalam mode Auto Interpreter:
+  /// - Pasangan bahasa dikunci
+  /// - STT menggunakan locale chain berbasis dua bahasa sesi
+  /// - Ucapan diproses melalui queue sequential
+  /// Jika null, halaman berjalan dalam mode normal (backward compatible).
+  final InterpreterSessionModel? session;
+
+  const ConversationPage({super.key, this.session});
 
   @override
   ConsumerState<ConversationPage> createState() => _ConversationPageState();
@@ -49,6 +58,12 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
   bool _earTipShown = false;
 
   bool get _isMobile => !kIsWeb && (Platform.isAndroid || Platform.isIOS);
+
+  /// Session dari route extra (jika masuk dari InterpreterSessionPage).
+  InterpreterSessionModel? get _session => widget.session;
+
+  /// True jika sedang dalam mode interpreter.
+  bool get _isInterpreterMode => _session != null;
 
   @override
   void initState() {
@@ -75,6 +90,17 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
   void dispose() {
     _scrollController.dispose();
     _ttsService.dispose();
+    // Jika sedang dalam sesi interpreter, akhiri sesi saat halaman ditutup.
+    // Ini memastikan tidak ada state yang bocor jika user keluar.
+    if (_isInterpreterMode) {
+      // Gunakan future.microtask agar tidak memanggil ref setelah widget
+      // unmounted secara tidak aman.
+      Future.microtask(() {
+        try {
+          ref.read(conversationProvider.notifier).endInterpreterSession();
+        } catch (_) {}
+      });
+    }
     super.dispose();
   }
 
@@ -297,12 +323,18 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
     setState(() {});
 
     final started = await _speechService.startListening(
-      localeId: 'id-ID',
+      localeId: _isInterpreterMode
+          ? (_session!.languageA.speechCode) // akan di-override oleh chain
+          : 'id-ID',
       languageCode: 'auto',
       onResult: _onSpeechResult,
       onSoundLevel: _onSoundLevel,
       autoDetectLanguage: true,
       manualControl: true,
+      // Jika mode interpreter, berikan kode bahasa sesi agar STT
+      // memprioritaskan locale yang relevan untuk dua bahasa ini.
+      sessionLanguageCodes:
+          _isInterpreterMode ? _session!.sessionLanguageCodes : null,
     );
 
     if (!mounted) return;
@@ -389,20 +421,38 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
         '[Speech Recognition] done (${finalText.length} chars) → detect+translate',
       );
 
-      await notifier.translate(text: finalText, detectSource: true);
+      // Mode interpreter: tambahkan ke antrian sequential.
+      // Mode normal: translate langsung (perilaku lama).
+      if (_isInterpreterMode) {
+        // Deteksi bahasa awal (sinkron) untuk menentukan fromCode sebelum
+        // masuk antrian. Deteksi final dilakukan di dalam provider.
+        // Gunakan bahasa A sebagai default jika tidak terdeteksi.
+        final defaultCode = _session!.languageA.code;
+        notifier.enqueueSpeechJob(
+          finalText,
+          detectedFromCode: defaultCode,
+        );
 
-      if (!mounted) return;
-      final state = ref.read(conversationProvider);
-      final translatedText = state.translatedText;
-      final looksLikeError = translatedText.startsWith('Terjemahan timeout') ||
-          translatedText.startsWith('Terjemahan gagal') ||
-          translatedText.startsWith('Limit terjemahan');
-      if (translatedText.isNotEmpty &&
-          translatedText != ConversationNotifier.translationPlaceholder &&
-          !looksLikeError &&
-          ref.read(settingsProvider).autoPlayTranslation) {
-        _scrollToBottom();
-        await _speakTranslation(translatedText, state.targetLanguage);
+        // Tunggu state berubah ke completed/error sebelum TTS.
+        // Di mode interpreter, TTS dipicu dari _listenForCompletedState().
+        _listenForCompletedAndSpeak();
+      } else {
+        await notifier.translate(text: finalText, detectSource: true);
+
+        if (!mounted) return;
+        final state = ref.read(conversationProvider);
+        final translatedText = state.translatedText;
+        final looksLikeError =
+            translatedText.startsWith('Terjemahan timeout') ||
+            translatedText.startsWith('Terjemahan gagal') ||
+            translatedText.startsWith('Limit terjemahan');
+        if (translatedText.isNotEmpty &&
+            translatedText != ConversationNotifier.translationPlaceholder &&
+            !looksLikeError &&
+            ref.read(settingsProvider).autoPlayTranslation) {
+          _scrollToBottom();
+          await _speakTranslation(translatedText, state.targetLanguage);
+        }
       }
     } finally {
       _finalizingSpeech = false;
@@ -414,6 +464,51 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
     return text == ConversationNotifier.speakerPlaceholder ||
         text == ConversationNotifier.translationPlaceholder ||
         text == 'Mendengarkan...';
+  }
+
+  /// Di mode interpreter, dengarkan perubahan state `completed` dan
+  /// mainkan TTS secara otomatis.
+  ///
+  /// Ini menggantikan await translate() yang ada di mode normal.
+  /// Penggunaan listen() di sini aman karena dibatasi satu kali.
+  void _listenForCompletedAndSpeak() {
+    // Baca state saat ini — jika sudah completed (proses cepat), langsung speak.
+    final current = ref.read(conversationProvider);
+    if (current.phase == ConversationPhase.completed) {
+      _maybePlayTts(current);
+      return;
+    }
+
+    // Belum completed — pasang satu listener yang akan dilepas otomatis.
+    ProviderSubscription<ConversationState>? sub;
+    sub = ref.listenManual(conversationProvider, (prev, next) {
+      if (!mounted) {
+        sub?.close();
+        return;
+      }
+      if (next.phase == ConversationPhase.completed ||
+          next.phase == ConversationPhase.error) {
+        sub?.close();
+        if (next.phase == ConversationPhase.completed) {
+          _maybePlayTts(next);
+        }
+      }
+    });
+  }
+
+  void _maybePlayTts(ConversationState state) {
+    if (!mounted) return;
+    final translatedText = state.translatedText;
+    final looksLikeError = translatedText.startsWith('Terjemahan timeout') ||
+        translatedText.startsWith('Terjemahan gagal') ||
+        translatedText.startsWith('Limit terjemahan');
+    if (translatedText.isNotEmpty &&
+        translatedText != ConversationNotifier.translationPlaceholder &&
+        !looksLikeError &&
+        ref.read(settingsProvider).autoPlayTranslation) {
+      _scrollToBottom();
+      _speakTranslation(translatedText, state.targetLanguage);
+    }
   }
 
   Future<void> _speakTranslation(
@@ -592,9 +687,13 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
                 lang: lang,
                 detectedSource: state.sourceLanguage,
                 targetLanguage: state.targetLanguage,
-                onTargetChanged: (language) => ref
-                    .read(conversationProvider.notifier)
-                    .setTargetLanguage(language),
+                isInterpreterMode: state.isInterpreterMode,
+                sessionLabel: state.activeSession?.displayLabel,
+                onTargetChanged: state.isInterpreterMode
+                    ? null
+                    : (language) => ref
+                        .read(conversationProvider.notifier)
+                        .setTargetLanguage(language),
                 onBack: () {
                   if (context.canPop()) {
                     context.pop();
@@ -742,23 +841,28 @@ class _TranslateHeader extends StatelessWidget {
     required this.lang,
     required this.detectedSource,
     required this.targetLanguage,
-    required this.onTargetChanged,
     required this.onBack,
     required this.onType,
     required this.onCamera,
     required this.onFavorites,
+    this.onTargetChanged,
     this.onClear,
+    this.isInterpreterMode = false,
+    this.sessionLabel,
   });
 
   final String lang;
   final LanguageModel detectedSource;
   final LanguageModel targetLanguage;
-  final ValueChanged<LanguageModel> onTargetChanged;
+  /// Null jika mode interpreter (picker dinonaktifkan).
+  final ValueChanged<LanguageModel>? onTargetChanged;
   final VoidCallback onBack;
   final VoidCallback onType;
   final VoidCallback onCamera;
   final VoidCallback onFavorites;
   final VoidCallback? onClear;
+  final bool isInterpreterMode;
+  final String? sessionLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -784,11 +888,15 @@ class _TranslateHeader extends StatelessWidget {
                   color: AppColors.cardElevated,
                   borderRadius: BorderRadius.circular(20),
                 ),
-                child: CompactHeaderLanguageBar(
-                  detectedSource: detectedSource,
-                  targetLanguage: targetLanguage,
-                  onTargetChanged: onTargetChanged,
-                ),
+                child: isInterpreterMode
+                    // Mode interpreter: tampilkan pasangan bahasa yang dikunci.
+                    ? _LockedSessionBar(sessionLabel: sessionLabel ?? '')
+                    // Mode normal: tampilkan picker bahasa yang bisa diklik.
+                    : CompactHeaderLanguageBar(
+                        detectedSource: detectedSource,
+                        targetLanguage: targetLanguage,
+                        onTargetChanged: onTargetChanged ?? (_) {},
+                      ),
               ),
             ),
             const SizedBox(width: 8),
@@ -832,6 +940,42 @@ class _TranslateHeader extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Bar header yang menampilkan pasangan bahasa yang dikunci dalam mode interpreter.
+///
+/// Tidak dapat diklik — hanya informasi visual bahwa bahasa sudah dikunci
+/// untuk sesi ini.
+class _LockedSessionBar extends StatelessWidget {
+  final String sessionLabel;
+  const _LockedSessionBar({required this.sessionLabel});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Icon(
+          Icons.lock_rounded,
+          size: 13,
+          color: AppColors.accentBlue,
+        ),
+        const SizedBox(width: 6),
+        Flexible(
+          child: Text(
+            sessionLabel,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: AppColors.textPrimary,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

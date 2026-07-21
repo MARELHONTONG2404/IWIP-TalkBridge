@@ -273,6 +273,10 @@ class SpeechService {
     bool autoDetectLanguage = false,
     /// Manual mic: jangan auto-stop karena jeda singkat.
     bool manualControl = false,
+    /// Kode bahasa sesi interpreter — digunakan untuk membangun locale chain
+    /// yang relevan. Jika diisi, chain akan memprioritaskan dua bahasa ini
+    /// di atas bahasa lain. Mendukung semua pasangan bahasa.
+    List<String>? sessionLanguageCodes,
   }) async {
     if (!_isAvailable) {
       if (!kIsWeb && Platform.isAndroid) {
@@ -300,7 +304,10 @@ class SpeechService {
     _manualControl = manualControl;
 
     if (autoDetectLanguage) {
-      _localeFallbackChain = await _buildAutoDetectLocaleChain();
+      // Jika ada kode bahasa sesi, prioritaskan kedua bahasa tersebut.
+      _localeFallbackChain = await _buildAutoDetectLocaleChain(
+        priorityLanguageCodes: sessionLanguageCodes,
+      );
     } else {
       // Paksa locale baku: id-ID / en-US / zh-CN.
       final preferredLocale = _canonicalLocale(languageCode, localeId);
@@ -369,7 +376,16 @@ class SpeechService {
     return _waitUntilListening();
   }
 
-  Future<List<String>> _buildAutoDetectLocaleChain() async {
+  /// Bangun locale chain untuk mode auto-detect.
+  ///
+  /// [priorityLanguageCodes] — kode bahasa yang diutamakan (mis. dari sesi
+  /// interpreter). Locale yang cocok dengan kode ini akan ditempatkan di depan
+  /// chain sehingga STT mencoba bahasa sesi terlebih dahulu.
+  ///
+  /// Mendukung semua pasangan bahasa — tidak lagi hardcode id/en/zh.
+  Future<List<String>> _buildAutoDetectLocaleChain({
+    List<String>? priorityLanguageCodes,
+  }) async {
     final locales = await _speech.locales();
     final chain = <String>[];
     final seen = <String>{};
@@ -382,27 +398,53 @@ class SpeechService {
       chain.add(localeId);
     }
 
-    // Hanya locale yang benar-benar ada di HP (hindari error_client id-ID palsu).
-    const iwipLangs = ['id', 'en', 'zh'];
-    for (final lang in iwipLangs) {
-      for (final locale in locales) {
-        if (_languageKey(locale.localeId) == lang) {
-          add(locale.localeId);
+    // 1. Prioritaskan locale dari bahasa sesi (jika ada).
+    if (priorityLanguageCodes != null && priorityLanguageCodes.isNotEmpty) {
+      for (final code in priorityLanguageCodes) {
+        for (final locale in locales) {
+          if (_languageKey(locale.localeId) == code) {
+            add(locale.localeId);
+          }
+        }
+      }
+    } else {
+      // Fallback default IWIP: id, en, zh — perilaku lama dipertahankan
+      // jika tidak ada session language codes.
+      const defaultIwipLangs = ['id', 'en', 'zh'];
+      for (final lang in defaultIwipLangs) {
+        for (final locale in locales) {
+          if (_languageKey(locale.localeId) == lang) {
+            add(locale.localeId);
+          }
         }
       }
     }
 
+    // 2. Tambahkan semua locale yang tersedia di perangkat sebagai fallback.
     for (final locale in locales) {
       add(locale.localeId);
     }
 
+    // 3. System locale sebagai tambahan.
     final system = await _speech.systemLocale();
     add(system?.localeId);
 
-    // Online auto sebagai fallback terakhir.
+    // 4. Online auto sebagai fallback terakhir.
     add(_autoLocaleToken);
 
     return chain;
+  }
+
+  /// Bangun locale chain berbasis dua bahasa sesi.
+  ///
+  /// Ini adalah versi publik dari [_buildAutoDetectLocaleChain] yang dapat
+  /// dipanggil dari luar (mis. untuk pre-warm atau logging).
+  Future<List<String>> buildSessionLocaleChain(
+    List<String> sessionLanguageCodes,
+  ) async {
+    return _buildAutoDetectLocaleChain(
+      priorityLanguageCodes: sessionLanguageCodes,
+    );
   }
 
   String _canonicalLocale(String languageCode, String localeId) {

@@ -1,5 +1,9 @@
 /// Deteksi bahasa dari teks STT (heuristik lokal, tanpa package baru).
-/// Fokus IWIP: id / en / zh.
+///
+/// Mendukung semua pasangan bahasa melalui parameter [detectForSession].
+/// Marker heuristik difokuskan pada id/en/zh karena ketiga bahasa ini
+/// memiliki karakteristik teks paling berbeda; bahasa lain diserahkan ke
+/// API online via [priorityCodes] hints.
 class LanguageDetector {
   LanguageDetector._();
 
@@ -147,7 +151,12 @@ class LanguageDetector {
   };
 
   /// Mengembalikan kode bahasa (`id`/`en`/`zh`/…) atau `null` jika tidak yakin.
-  static String? detectLocal(String text) {
+  ///
+  /// [priorityCodes] — kode bahasa yang diutamakan (mis. dari sesi interpreter).
+  /// Jika teks tidak mengandung marker kuat dan salah satu kode ada di
+  /// [priorityCodes], kode tersebut akan dikembalikan sebagai fallback sebelum
+  /// menyerahkan ke API online.
+  static String? detectLocal(String text, {List<String>? priorityCodes}) {
     final trimmed = text.trim();
     if (trimmed.isEmpty) return null;
 
@@ -155,7 +164,20 @@ class LanguageDetector {
     final letters = RegExp(r'[A-Za-z\u4e00-\u9fff]').allMatches(trimmed).length;
     if (letters == 0) return null;
 
-    if (cjk / letters >= 0.25) return 'zh';
+    // CJK dominan → Mandarin (atau bahasa CJK lain jika ada di prioritas).
+    if (cjk / letters >= 0.25) {
+      // Jika ada bahasa CJK lain (ja, ko) di prioritas, periksa dulu.
+      if (priorityCodes != null) {
+        for (final code in priorityCodes) {
+          if (code == 'ja' || code == 'ko' || code == 'zh') {
+            // Biarkan API online yang membedakan ja/ko/zh;
+            // heuristik kita tidak cukup akurat untuk membedakan.
+            return null;
+          }
+        }
+      }
+      return 'zh';
+    }
 
     final words = _latinWord
         .allMatches(trimmed.toLowerCase())
@@ -181,15 +203,52 @@ class LanguageDetector {
     }
 
     if (idScore == 0 && enScore == 0) {
-      // Banyak kata Latin tanpa marker kuat → default Inggris lebih aman untuk STT online.
+      // Tidak ada marker kuat. Jika sesi hanya melibatkan dua bahasa
+      // Latin non-id/non-en (mis. es↔fr), serahkan ke API.
+      if (priorityCodes != null &&
+          !priorityCodes.contains('id') &&
+          !priorityCodes.contains('en')) {
+        return null;
+      }
+      // Default: Inggris lebih aman untuk STT online jika >=3 kata.
       return words.length >= 3 ? 'en' : null;
     }
+
     // Butuh selisih minimal 2 poin agar yakin; jika seri atau selisih 1,
     // prioritaskan Indonesia (konteks IWIP = site Indonesia).
     if (idScore >= enScore + 2) return 'id';
     if (enScore >= idScore + 2) return 'en';
-    // Selisih kecil / seri → default Indonesia (konteks site IWIP).
+    // Selisih kecil / seri.
     if (idScore > 0) return 'id';
     return enScore > 0 ? 'en' : 'id';
+  }
+
+  /// Deteksi bahasa khusus untuk sesi interpreter dengan dua bahasa tetap.
+  ///
+  /// Mengembalikan `langACode` atau `langBCode` berdasarkan analisis teks.
+  /// Jika tidak yakin, mengembalikan `null` (serahkan ke API online).
+  /// Jika API online juga tidak digunakan, fallback ke [defaultCode].
+  static String? detectForSession(
+    String text, {
+    required String langACode,
+    required String langBCode,
+    String? defaultCode,
+  }) {
+    final priorityCodes = [langACode, langBCode];
+
+    // Gunakan deteksi lokal dengan hints sesi.
+    final local = detectLocal(text, priorityCodes: priorityCodes);
+
+    // Jika hasil deteksi cocok dengan salah satu bahasa sesi, kembalikan.
+    if (local != null) {
+      if (local == langACode) return langACode;
+      if (local == langBCode) return langBCode;
+
+      // Hasil deteksi bukan salah satu dari dua bahasa sesi.
+      // Dalam konteks interpreter, default ke bahasa A.
+      return defaultCode ?? langACode;
+    }
+
+    return null; // Serahkan ke API online.
   }
 }
