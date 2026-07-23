@@ -74,7 +74,7 @@ flutter:
 flutter_launcher_icons:
   android: true
   ios: true
-  image_path: "assets/images/IWIP-Logo-150.png"
+  image_path: "assets/images/iwip_logo_v2.jpg"
   adaptive_icon_background: "#ffffff"
-  adaptive_icon_foreground: "assets/images/IWIP-Logo-150.png"
+  adaptive_icon_foreground: "assets/images/iwip_logo_v2.jpg"
 
