@@ -25,6 +25,7 @@ class TranslationService {
   /// Official Google Cloud Translation API key (optional).
   /// Pass at build/run: `--dart-define=GOOGLE_TRANSLATE_API_KEY=your_key`
   static const _cloudApiKey = String.fromEnvironment('GOOGLE_TRANSLATE_API_KEY');
+  static const _geminiApiKey = String.fromEnvironment('GEMINI_API_KEY');
 
   static const _cloudUrl =
       'https://translation.googleapis.com/language/translate/v2';
@@ -158,25 +159,39 @@ class TranslationService {
     if (text.length <= maxLen) return [text];
 
     final chunks = <String>[];
-    var remaining = text.trim();
+    // Pisahkan berdasarkan tanda baca akhir kalimat
+    final sentencePattern = RegExp(r'([^.!?。！？\n]+[.!?。！？\n]+|[^.!?。！？\n]+$)');
+    final matches = sentencePattern.allMatches(text);
 
-    while (remaining.length > maxLen) {
-      var cut = remaining.lastIndexOf(RegExp(r'[.!?。！？\n]'), maxLen);
-      if (cut < maxLen ~/ 2) {
-        cut = remaining.lastIndexOf(' ', maxLen);
-      }
-      if (cut < maxLen ~/ 2) {
-        cut = maxLen;
+    var currentChunk = StringBuffer();
+    for (final match in matches) {
+      final sentence = match.group(0)!;
+      if (currentChunk.length + sentence.length > maxLen) {
+        if (currentChunk.isNotEmpty) {
+          chunks.add(currentChunk.toString().trim());
+          currentChunk.clear();
+        }
+        if (sentence.length > maxLen) {
+          // Fallback jika satu kalimat sangat panjang melebihi maxLen
+          var remaining = sentence;
+          while (remaining.length > maxLen) {
+            var cut = remaining.lastIndexOf(' ', maxLen);
+            if (cut == -1) cut = maxLen;
+            chunks.add(remaining.substring(0, cut).trim());
+            remaining = remaining.substring(cut).trim();
+          }
+          if (remaining.isNotEmpty) currentChunk.write(remaining);
+        } else {
+          currentChunk.write(sentence);
+        }
       } else {
-        cut += 1;
+        currentChunk.write(sentence);
       }
-
-      chunks.add(remaining.substring(0, cut).trim());
-      remaining = remaining.substring(cut).trim();
     }
 
-    if (remaining.isNotEmpty) {
-      chunks.add(remaining);
+    if (currentChunk.isNotEmpty) {
+      final finalChunk = currentChunk.toString().trim();
+      if (finalChunk.isNotEmpty) chunks.add(finalChunk);
     }
     return chunks;
   }
@@ -236,13 +251,16 @@ class TranslationService {
     TranslationException? lastError;
 
     final attempts = <Future<String> Function()>[
+      if (_geminiApiKey.isNotEmpty) () => _translateGemini(input, from, to),
       if (_cloudApiKey.isNotEmpty) () => _translateCloudOfficial(input, from, to),
       () => _translateGoogle(input, from, to),
       if (from != 'auto') () => _translateGoogle(input, 'auto', to),
       () => _translateMyMemory(input, from, to),
     ];
 
-    if (_cloudApiKey.isNotEmpty) {
+    if (_geminiApiKey.isNotEmpty) {
+       _log('[Translation API] using Gemini AI first');
+    } else if (_cloudApiKey.isNotEmpty) {
        _log('[Translation API] using Cloud Translation (official) first');
     }
 
@@ -321,6 +339,79 @@ class TranslationService {
 
     if (translated.isEmpty) {
       throw const TranslationException('Cloud Translation: hasil kosong');
+    }
+
+    return translated;
+  }
+
+  Future<String> _translateGemini(
+    String text,
+    String from,
+    String to,
+  ) async {
+    final uri = Uri.parse(
+        'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$_geminiApiKey');
+
+    final systemInstruction = '''
+Anda adalah penerjemah ahli untuk perusahaan pertambangan nikel dan smelter (PT IWIP) di Indonesia.
+Tugas Anda: Menerjemahkan percakapan. Bahasa target: $to.
+Aturan:
+1. Terjemahkan berdasarkan KONTEKS KALIMAT, BUKAN kata per kata (harfiah).
+2. Jika menerjemahkan ke Mandarin (zh), gunakan Simplified Chinese (Mainland China) dengan tata bahasa yang alami, umum digunakan sehari-hari, dan mudah dipahami oleh penutur asli di lingkungan kerja.
+3. Gunakan istilah yang biasa dipakai di lingkungan kerja, pabrik, dan kantor pertambangan.
+4. Pertahankan nama orang, nama perusahaan, dan istilah teknis tanpa menerjemahkannya jika itu mengubah maknanya secara keliru.
+5. Hanya berikan hasil terjemahan akhirnya saja tanpa tanda kutip, tanpa penjelasan tambahan, dan tanpa markdown.
+''';
+
+    final body = {
+      "systemInstruction": {
+        "parts": [
+          {"text": systemInstruction}
+        ]
+      },
+      "contents": [
+        {
+          "parts": [
+            {"text": text}
+          ]
+        }
+      ],
+      "generationConfig": {
+        "temperature": 0.1,
+      }
+    };
+
+    final response = await http
+        .post(
+          uri,
+          headers: {
+            'Content-Type': 'application/json; charset=utf-8',
+          },
+          body: jsonEncode(body),
+        )
+        .timeout(_requestTimeout);
+
+    if (response.statusCode != 200) {
+      throw TranslationException(
+        'Gemini API error (${response.statusCode}): ${response.body}',
+      );
+    }
+
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    final candidates = data['candidates'] as List?;
+    if (candidates == null || candidates.isEmpty) {
+      throw const TranslationException('Gemini API: hasil kosong');
+    }
+
+    final parts = (candidates.first as Map<String, dynamic>)['content']['parts'] as List?;
+    if (parts == null || parts.isEmpty) {
+      throw const TranslationException('Gemini API: hasil kosong');
+    }
+
+    final translated = parts.first['text']?.toString().trim() ?? '';
+
+    if (translated.isEmpty) {
+      throw const TranslationException('Gemini API: hasil kosong');
     }
 
     return translated;

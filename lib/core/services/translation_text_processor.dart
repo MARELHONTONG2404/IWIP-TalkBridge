@@ -160,6 +160,33 @@ class TranslationTextProcessor {
       );
     }
 
+    // Kapitalisasi entitas penting agar mesin terjemahan tidak merusaknya
+    const properNouns = [
+      'iwip',
+      'weda bay',
+      'halmahera',
+      'indonesia',
+      'china',
+      'tiongkok',
+      'android',
+      'ios',
+      'flutter',
+      'github',
+      'api',
+      'server',
+      'database',
+      'wifi',
+      'internet',
+    ];
+    
+    for (final noun in properNouns) {
+      final capitalized = noun.split(' ').map((w) => w.isNotEmpty ? '\${w[0].toUpperCase()}\${w.substring(1)}' : '').join(' ');
+      normalized = normalized.replaceAllMapped(
+        RegExp(r'\b' + RegExp.escape(noun) + r'\b', caseSensitive: false),
+        (match) => capitalized,
+      );
+    }
+
     return normalized;
   }
 

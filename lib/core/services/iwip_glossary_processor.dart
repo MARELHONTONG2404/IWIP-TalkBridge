@@ -29,6 +29,26 @@ class IwipGlossaryProcessor {
       }
     }
 
+    return _postProcessGrammar(result, toCode);
+  }
+
+  static String _postProcessGrammar(String text, String toCode) {
+    var result = text;
+    if (toCode == 'zh') {
+      // Perbaikan tata bahasa kontekstual spesifik untuk terjemahan harfiah Mandarin.
+      // Jangan gunakan replace statis berlebihan, hanya struktur yang pasti salah di lingkungan pabrik lisan.
+      const grammarCorrections = {
+        '正在进工作': '正在上班', // "sedang masuk kerja" -> "sedang bekerja/shift"
+        '去工作': '去上班', // "pergi kerja" -> "pergi shift/bekerja"
+        '你在哪里': '您在哪儿', // Lebih sopan di site
+        '我在找': '我正在找', // "saya cari" -> "saya sedang cari"
+        '请你': '请您', // Lebih sopan
+      };
+
+      for (final entry in grammarCorrections.entries) {
+        result = result.replaceAll(entry.key, entry.value);
+      }
+    }
     return result;
   }
 

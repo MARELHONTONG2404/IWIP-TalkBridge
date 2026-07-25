@@ -49,6 +49,11 @@ class LanguageDetector {
     'nikel',
     'izin',
     'pelindung',
+    'absen',
+    'lembur',
+    'karyawan',
+    'pabrik',
+    'proyek',
   };
 
   // Kata Indonesia yang lebih umum (bobot 1) — bisa overlap dengan bahasa lain

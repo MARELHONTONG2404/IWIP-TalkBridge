@@ -57,9 +57,8 @@ class ConversationCardItem {
 /// yang hilang atau tumpang tindih selama sesi panjang (2–4 jam).
 class _SpeechJob {
   final String text;
-  final String detectedFromCode;
 
-  const _SpeechJob({required this.text, required this.detectedFromCode});
+  const _SpeechJob({required this.text});
 }
 
 class ConversationState {
@@ -181,6 +180,7 @@ class ConversationNotifier extends StateNotifier<ConversationState> {
       OfflineTranslationService();
   Timer? _translateDebounce;
   String? _lastTranslatedSource;
+  String? _lastDetectedSessionLanguage;
 
   // ── Sequential Speech Queue ───────────────────────────────────────────────
   // Antrian ini memastikan setiap ucapan diproses satu per satu:
@@ -323,6 +323,7 @@ class ConversationNotifier extends StateNotifier<ConversationState> {
     _speechQueue.clear();
     _isProcessingQueue = false;
     _lastTranslatedSource = null;
+    _lastDetectedSessionLanguage = null;
 
     state = state.copyWith(
       activeSession: session,
@@ -345,6 +346,7 @@ class ConversationNotifier extends StateNotifier<ConversationState> {
     _speechQueue.clear();
     _isProcessingQueue = false;
     _lastTranslatedSource = null;
+    _lastDetectedSessionLanguage = null;
 
     state = state.copyWith(
       clearSession: true,
@@ -366,11 +368,11 @@ class ConversationNotifier extends StateNotifier<ConversationState> {
   /// Jika tidak ada job yang sedang berjalan, langsung mulai memproses.
   /// Jika ada job yang sedang berjalan, ucapan baru akan menunggu gilirannya.
   /// Tidak ada ucapan yang hilang, tidak ada yang tumpang tindih.
-  void enqueueSpeechJob(String text, {required String detectedFromCode}) {
+  void enqueueSpeechJob(String text) {
     final raw = text.trim();
     if (raw.isEmpty || _skipTranslateTexts.contains(raw)) return;
 
-    _speechQueue.addLast(_SpeechJob(text: raw, detectedFromCode: detectedFromCode));
+    _speechQueue.addLast(_SpeechJob(text: raw));
     _log('[Queue] Job ditambahkan. Antrian: ${_speechQueue.length}');
 
     if (!_isProcessingQueue) {
@@ -419,7 +421,7 @@ class ConversationNotifier extends StateNotifier<ConversationState> {
     if (!mounted) return;
 
     final session = state.activeSession;
-    final fromCode = job.detectedFromCode;
+    final fromCode = await _resolveSourceLanguage(job.text);
     final toCode = session != null
         ? _resolveTargetLanguageForSession(fromCode, session)
         : _resolveTargetLanguage(fromCode);
@@ -728,14 +730,18 @@ class ConversationNotifier extends StateNotifier<ConversationState> {
         final detected = await _translator.detectLanguage(text);
         if (detected.isNotEmpty && detected != 'auto') {
           // Pastikan hasil API cocok dengan salah satu bahasa sesi.
-          if (detected == session.languageA.code) return session.languageA.code;
-          if (detected == session.languageB.code) return session.languageB.code;
-          // Tidak cocok dengan sesi → default ke bahasa A.
-          return session.languageA.code;
+          if (detected == session.languageA.code) {
+            _lastDetectedSessionLanguage = session.languageA.code;
+            return session.languageA.code;
+          }
+          if (detected == session.languageB.code) {
+            _lastDetectedSessionLanguage = session.languageB.code;
+            return session.languageB.code;
+          }
         }
       } catch (_) {}
 
-      return session.languageA.code;
+      return _lastDetectedSessionLanguage ?? session.languageA.code;
     }
 
     // Mode normal — logika asli dipertahankan.

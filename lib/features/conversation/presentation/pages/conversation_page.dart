@@ -74,10 +74,18 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
         if (!mounted) return;
         ref.read(conversationProvider.notifier).setSpeaking();
         _showEarTipOnce();
+        
+        if (_isInterpreterMode && _manualSessionActive) {
+          _speechService.stopListening();
+        }
       },
       onComplete: () {
         if (!mounted) return;
         ref.read(conversationProvider.notifier).setCompleted();
+        
+        if (_isInterpreterMode && _manualSessionActive && !_userRequestedStop) {
+          _continueManualSession();
+        }
       },
       onError: (message) {
         if (!mounted) return;
@@ -171,6 +179,9 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
           );
         } else if (status == 'notListening' || status == 'done') {
           if (_manualSessionActive && !_userRequestedStop) {
+            if (_isInterpreterMode) {
+              _finalizeSpeechAndTranslate();
+            }
             _continueManualSession();
             return;
           }
@@ -424,18 +435,10 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
       // Mode interpreter: tambahkan ke antrian sequential.
       // Mode normal: translate langsung (perilaku lama).
       if (_isInterpreterMode) {
-        // Deteksi bahasa awal (sinkron) untuk menentukan fromCode sebelum
-        // masuk antrian. Deteksi final dilakukan di dalam provider.
-        // Gunakan bahasa A sebagai default jika tidak terdeteksi.
-        final defaultCode = _session!.languageA.code;
-        notifier.enqueueSpeechJob(
-          finalText,
-          detectedFromCode: defaultCode,
-        );
-
-        // Tunggu state berubah ke completed/error sebelum TTS.
-        // Di mode interpreter, TTS dipicu dari _listenForCompletedState().
-        _listenForCompletedAndSpeak();
+        // Deteksi bahasa dipindahkan ke dalam queue di provider.
+        notifier.enqueueSpeechJob(finalText);
+        _committedText = '';
+        _livePartial = '';
       } else {
         await notifier.translate(text: finalText, detectSource: true);
 
@@ -451,7 +454,9 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
             !looksLikeError &&
             ref.read(settingsProvider).autoPlayTranslation) {
           _scrollToBottom();
-          await _speakTranslation(translatedText, state.targetLanguage);
+          final latestCard = state.cards.isNotEmpty ? state.cards.last : null;
+          final targetLang = latestCard?.targetLanguage ?? state.targetLanguage;
+          await _speakTranslation(translatedText, targetLang);
         }
       }
     } finally {
@@ -466,35 +471,7 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
         text == 'Mendengarkan...';
   }
 
-  /// Di mode interpreter, dengarkan perubahan state `completed` dan
-  /// mainkan TTS secara otomatis.
-  ///
-  /// Ini menggantikan await translate() yang ada di mode normal.
-  /// Penggunaan listen() di sini aman karena dibatasi satu kali.
-  void _listenForCompletedAndSpeak() {
-    // Baca state saat ini — jika sudah completed (proses cepat), langsung speak.
-    final current = ref.read(conversationProvider);
-    if (current.phase == ConversationPhase.completed) {
-      _maybePlayTts(current);
-      return;
-    }
 
-    // Belum completed — pasang satu listener yang akan dilepas otomatis.
-    ProviderSubscription<ConversationState>? sub;
-    sub = ref.listenManual(conversationProvider, (prev, next) {
-      if (!mounted) {
-        sub?.close();
-        return;
-      }
-      if (next.phase == ConversationPhase.completed ||
-          next.phase == ConversationPhase.error) {
-        sub?.close();
-        if (next.phase == ConversationPhase.completed) {
-          _maybePlayTts(next);
-        }
-      }
-    });
-  }
 
   void _maybePlayTts(ConversationState state) {
     if (!mounted) return;
@@ -507,7 +484,9 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
         !looksLikeError &&
         ref.read(settingsProvider).autoPlayTranslation) {
       _scrollToBottom();
-      _speakTranslation(translatedText, state.targetLanguage);
+      final latestCard = state.cards.isNotEmpty ? state.cards.last : null;
+      final targetLang = latestCard?.targetLanguage ?? state.targetLanguage;
+      _speakTranslation(translatedText, targetLang);
     }
   }
 
@@ -624,8 +603,8 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
                 await notifier.translate(text: text, detectSource: true);
                 if (!mounted) return;
 
-                final translatedText =
-                    ref.read(conversationProvider).translatedText;
+                final state = ref.read(conversationProvider);
+                final translatedText = state.translatedText;
                 final looksLikeError =
                     translatedText.startsWith('Terjemahan timeout') ||
                         translatedText.startsWith('Terjemahan gagal') ||
@@ -635,9 +614,11 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
                         ConversationNotifier.translationPlaceholder &&
                     !looksLikeError) {
                   _scrollToBottom();
+                  final latestCard = state.cards.isNotEmpty ? state.cards.last : null;
+                  final targetLang = latestCard?.targetLanguage ?? state.targetLanguage;
                   await _speakTranslation(
                     translatedText,
-                    ref.read(conversationProvider).targetLanguage,
+                    targetLang,
                   );
                 }
               },
@@ -655,6 +636,18 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<ConversationState>(conversationProvider, (prev, next) {
+      if (prev?.phase != next.phase) {
+        if (next.phase == ConversationPhase.completed && _isInterpreterMode) {
+          _maybePlayTts(next);
+        } else if (next.phase == ConversationPhase.error && _isInterpreterMode) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(next.errorMessage ?? 'Terjadi kesalahan')),
+          );
+        }
+      }
+    });
+
     final state = ref.watch(conversationProvider);
     final settings = ref.watch(settingsProvider);
     final isListening = state.isListening || _manualSessionActive;
@@ -733,16 +726,24 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
                 ),
 
               Expanded(
-                child: state.cards.isEmpty && !isListening
-                    ? _EmptyState(
-                        lang: lang,
-                        onType: _showTextInputDialog,
+                child: (state.cards.isEmpty && !isListening && !state.isTranslating && !state.isSpeakerDraft)
+                    ? ListView(
+                        controller: _scrollController,
+                        padding: const EdgeInsets.all(16),
+                        children: [
+                          _EmptyState(
+                            lang: lang,
+                            onType: _showTextInputDialog,
+                          )
+                        ],
                       )
-                    : ListView(
+                    : ListView.builder(
                         controller: _scrollController,
                         padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
-                        children: [
-                          ...state.cards.map((card) {
+                        itemCount: state.cards.length + (isListening || state.isSpeakerDraft ? 1 : 0) + (state.isTranslating ? 1 : 0),
+                        itemBuilder: (context, index) {
+                          if (index < state.cards.length) {
+                            final card = state.cards[index];
                             final isFav = ref
                                 .watch(favoriteProvider.notifier)
                                 .isFavorite(
@@ -771,14 +772,18 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
                                   .read(conversationProvider.notifier)
                                   .removeCard(card.id),
                             );
-                          }),
-                          if (isListening || state.isSpeakerDraft)
-                            _LivePreviewCard(
+                          }
+                          
+                          final extraIndex = index - state.cards.length;
+                          if (extraIndex == 0 && (isListening || state.isSpeakerDraft)) {
+                            return _LivePreviewCard(
                               text: state.speakerText,
                               isListening: isListening,
-                            ),
-                          if (state.isTranslating)
-                            Padding(
+                            );
+                          }
+                          
+                          if (state.isTranslating) {
+                            return Padding(
                               padding: const EdgeInsets.symmetric(vertical: 20),
                               child: Center(
                                 child: Row(
@@ -803,8 +808,10 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
                                   ],
                                 ),
                               ),
-                            ),
-                        ],
+                            );
+                          }
+                          return const SizedBox.shrink();
+                        },
                       ),
               ),
 
