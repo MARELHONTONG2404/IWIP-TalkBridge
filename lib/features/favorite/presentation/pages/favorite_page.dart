@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:permission_handler/permission_handler.dart';
 import '../../../../core/services/tts_service.dart';
 import '../../providers/favorite_provider.dart';
 
@@ -136,24 +137,7 @@ class _FavoritePageState extends ConsumerState<FavoritePage> {
                             IconButton(
                               icon: Icon(Icons.volume_up, color: theme.colorScheme.primary),
                               tooltip: 'Speak translation',
-                              onPressed: () {
-                                String code = 'en';
-                                final t = item.targetLang.toLowerCase();
-                                if (t.contains('indo') || t == 'id') {
-                                  code = 'id';
-                                } else if (t.contains('chin') ||
-                                    t == 'zh' ||
-                                    item.targetLang.contains('中文')) {
-                                  code = 'zh';
-                                } else if (t.contains('jap') ||
-                                    item.targetLang.contains('日本語')) {
-                                  code = 'ja';
-                                } else if (t.contains('kor') ||
-                                    item.targetLang.contains('한국어')) {
-                                  code = 'ko';
-                                }
-                                _ttsService.speak(item.translatedText, languageCode: code);
-                              },
+                              onPressed: () => _playTts(item.translatedText, item.targetLang),
                             ),
                             IconButton(
                               icon: Icon(Icons.delete_outline, color: theme.colorScheme.error),
@@ -210,6 +194,60 @@ class _FavoritePageState extends ConsumerState<FavoritePage> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  void _playTts(String text, String targetLang) {
+    _ttsService.setHandlers(
+      onError: (message, {isMissingVoice = false}) {
+        if (!mounted) return;
+        if (isMissingVoice) {
+          _showMissingVoiceDialog(message);
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+        }
+      },
+    );
+
+    String code = 'en';
+    final t = targetLang.toLowerCase();
+    if (t.contains('indo') || t == 'id') {
+      code = 'id';
+    } else if (t.contains('chin') ||
+        t == 'zh' ||
+        targetLang.contains('中文')) {
+      code = 'zh';
+    } else if (t.contains('jap') ||
+        targetLang.contains('日本語')) {
+      code = 'ja';
+    } else if (t.contains('kor') ||
+        targetLang.contains('한국어')) {
+      code = 'ko';
+    }
+
+    _ttsService.speak(text, languageCode: code, notifyOnError: true);
+  }
+
+  void _showMissingVoiceDialog(String message) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Paket Suara Tidak Tersedia'),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(context);
+              openAppSettings();
+            },
+            child: const Text('Open Settings'),
+          ),
+        ],
       ),
     );
   }

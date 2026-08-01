@@ -1,3 +1,4 @@
+// ignore_for_file: avoid_print
 import 'package:ilb/core/services/translation_service.dart';
 
 void main() async {

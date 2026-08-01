@@ -1,6 +1,5 @@
 import 'package:go_router/go_router.dart';
 
-import '../features/splash/presentation/splash_page.dart';
 import '../features/welcome/presentation/welcome_page.dart';
 import '../features/home/presentation/home_page.dart';
 import '../features/conversation/presentation/pages/conversation_page.dart';
@@ -13,13 +12,9 @@ import '../features/favorite/presentation/pages/favorite_page.dart';
 import '../features/camera/presentation/camera_translate_page.dart';
 
 final GoRouter appRouter = GoRouter(
-  initialLocation: '/',
+  initialLocation: '/home',
 
   routes: [
-    GoRoute(
-      path: '/',
-      builder: (context, state) => const SplashPage(),
-    ),
     GoRoute(
       path: '/welcome',
       builder: (context, state) => const WelcomePage(),

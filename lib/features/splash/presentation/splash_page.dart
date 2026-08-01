@@ -1,7 +1,6 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
 
 import '../../../app/app_colors.dart';
 import '../../../shared/widgets/floating_orbs_background.dart';
@@ -65,10 +64,6 @@ class _SplashPageState extends State<SplashPage> with TickerProviderStateMixin {
     );
 
     _logoController.forward();
-
-    Future<void>.delayed(const Duration(milliseconds: 2800), () {
-      if (mounted) context.go('/home');
-    });
   }
 
   @override
@@ -81,6 +76,7 @@ class _SplashPageState extends State<SplashPage> with TickerProviderStateMixin {
 
   @override
   Widget build(BuildContext context) {
+    debugPrint('--- AUDIT: SplashPage build() called');
     return Scaffold(
       body: Stack(
         fit: StackFit.expand,

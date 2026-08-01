@@ -179,7 +179,26 @@ class ConversationNotifier extends StateNotifier<ConversationState> {
   final OfflineTranslationService _offlineTranslator =
       OfflineTranslationService();
   Timer? _translateDebounce;
-  String? _lastTranslatedSource;
+
+  // ── Request ID & Session ID ───────────────────────────────────────────────
+  // Mekanisme cancellation berbasis ID — bukan berbasis isi teks.
+  //
+  // _activeTranslationId: diincrement setiap kali translate() dipanggil.
+  //   Setelah setiap await, result yang dikembalikan dibandingkan dengan ID
+  //   saat ini. Jika tidak cocok → request sudah stale → diabaikan.
+  //
+  // _sessionId: diincrement setiap kali interpreter session dimulai/diakhiri.
+  //   _executeJob() menyimpan ID saat job mulai; jika ID berubah sebelum
+  //   await selesai → session sudah berakhir → result diabaikan.
+  //
+  // Prinsip: dua event berbeda (mis. user ucap "Halo" dua kali) TETAP
+  // diterjemahkan dua kali. Yang diabaikan hanyalah:
+  //   - duplicate async completion dari request yang sama
+  //   - stale result dari request yang sudah dibatalkan
+  //   - job dari sesi interpreter yang sudah diakhiri
+  int _activeTranslationId = 0;
+  int _sessionId = 0;
+
   String? _lastDetectedSessionLanguage;
 
   // ── Sequential Speech Queue ───────────────────────────────────────────────
@@ -322,7 +341,9 @@ class ConversationNotifier extends StateNotifier<ConversationState> {
   void startInterpreterSession(InterpreterSessionModel session) {
     _speechQueue.clear();
     _isProcessingQueue = false;
-    _lastTranslatedSource = null;
+    // Increment IDs untuk membatalkan job/translation in-flight dari sesi lama.
+    _sessionId++;
+    _activeTranslationId++;
     _lastDetectedSessionLanguage = null;
 
     state = state.copyWith(
@@ -345,7 +366,9 @@ class ConversationNotifier extends StateNotifier<ConversationState> {
   void endInterpreterSession() {
     _speechQueue.clear();
     _isProcessingQueue = false;
-    _lastTranslatedSource = null;
+    // Increment IDs untuk membatalkan semua job/translation yang masih berjalan.
+    _sessionId++;
+    _activeTranslationId++;
     _lastDetectedSessionLanguage = null;
 
     state = state.copyWith(
@@ -417,11 +440,22 @@ class ConversationNotifier extends StateNotifier<ConversationState> {
   /// TTS tidak dieksekusi di sini — TTS dipanggil oleh ConversationPage
   /// setelah menerima state `completed`, sehingga UI tetap mengontrol
   /// output audio dan sequential queue tidak perlu menunggu TTS selesai.
+  ///
+  /// Session ID guard: jika sesi interpreter diakhiri saat job sedang
+  /// berjalan, result dari await yang sudah selesai akan diabaikan.
   Future<void> _executeJob(_SpeechJob job) async {
     if (!mounted) return;
 
+    // Snapshot Session ID di awal job. Jika _sessionId berubah sebelum
+    // await selesai (mis. endInterpreterSession dipanggil), job ini diabaikan.
+    final mySessionId = _sessionId;
+
     final session = state.activeSession;
     final fromCode = await _resolveSourceLanguage(job.text);
+
+    // Sesi sudah berakhir sejak job ini dimulai — buang hasilnya.
+    if (mySessionId != _sessionId || !mounted) return;
+
     final toCode = session != null
         ? _resolveTargetLanguageForSession(fromCode, session)
         : _resolveTargetLanguage(fromCode);
@@ -436,17 +470,7 @@ class ConversationNotifier extends StateNotifier<ConversationState> {
       return;
     }
 
-    // Cek duplikat — hindari terjemah ulang teks yang sama.
-    if (sourceText == _lastTranslatedSource &&
-        state.translatedText.isNotEmpty &&
-        state.translatedText != translationPlaceholder &&
-        !state.translatedText.startsWith('Terjemahan')) {
-      setCompleted();
-      return;
-    }
-
     if (fromCode == toCode) {
-      _lastTranslatedSource = sourceText;
       state = state.copyWith(
         speakerText: sourceText,
         translatedText: sourceText,
@@ -472,9 +496,9 @@ class ConversationNotifier extends StateNotifier<ConversationState> {
         to: toCode,
       );
 
-      if (!mounted) return;
+      // Sesi sudah berakhir sejak translation dimulai — buang hasilnya.
+      if (mySessionId != _sessionId || !mounted) return;
 
-      _lastTranslatedSource = sourceText;
       state = state.copyWith(
         speakerText: sourceText,
         translatedText: translated,
@@ -499,17 +523,17 @@ class ConversationNotifier extends StateNotifier<ConversationState> {
       setCompleted();
     } on TimeoutException catch (e) {
       _log('[Queue] Timeout: $e');
-      if (!mounted) return;
+      if (mySessionId != _sessionId || !mounted) return;
       const msg = 'Terjemahan timeout. Silakan coba lagi.';
       setError(msg, retryText: sourceText);
       state = state.copyWith(translatedText: msg);
     } on TranslationException catch (e) {
       _log('[Queue] Translation error: $e');
-      if (!mounted) return;
+      if (mySessionId != _sessionId || !mounted) return;
       setError(e.message, retryText: sourceText);
       state = state.copyWith(translatedText: e.message);
     } catch (e) {
-      if (!mounted) return;
+      if (mySessionId != _sessionId || !mounted) return;
       final msg = '$e';
       if (msg.toLowerCase().contains('socketexception') ||
           msg.toLowerCase().contains('failed host lookup')) {
@@ -549,6 +573,12 @@ class ConversationNotifier extends StateNotifier<ConversationState> {
   /// - Input teks manual (keyboard)
   /// - Retry dari error banner
   /// - Backward compatibility dengan mode non-interpreter
+  ///
+  /// Request ID guard: setiap panggilan mendapat ID unik. Jika terjadi
+  /// concurrent call (mis. user mengetik cepat, retry bertumpuk), result
+  /// dari call yang lebih lama diabaikan — hanya call terakhir yang update
+  /// state. Ini berbasis ID, BUKAN berbasis isi teks, sehingga dua ucapan
+  /// yang sama (mis. "Halo" → "Halo") tetap diterjemahkan dua kali.
   Future<void> translate({String? text, bool detectSource = true}) async {
     _translateDebounce?.cancel();
 
@@ -562,6 +592,10 @@ class ConversationNotifier extends StateNotifier<ConversationState> {
       return;
     }
 
+    // Request ID: increment setiap kali translate() dipanggil.
+    // Concurrent call sebelumnya → ID-nya sudah tidak cocok → diabaikan.
+    final myId = ++_activeTranslationId;
+
     state = state.copyWith(
       phase: ConversationPhase.detectingLanguage,
       clearError: true,
@@ -572,6 +606,8 @@ class ConversationNotifier extends StateNotifier<ConversationState> {
     var fromCode = state.sourceLanguage.code;
     if (detectSource) {
       fromCode = await _resolveSourceLanguage(raw);
+      // Request baru sudah dimulai sejak await ini — buang hasilnya.
+      if (myId != _activeTranslationId || !mounted) return;
     }
 
     final prepared = SpeechTextProcessor.postProcess(raw, fromCode);
@@ -588,17 +624,8 @@ class ConversationNotifier extends StateNotifier<ConversationState> {
         ? _resolveTargetLanguageForSession(fromCode, session)
         : _resolveTargetLanguage(fromCode);
 
-    if (sourceText == _lastTranslatedSource &&
-        state.translatedText.isNotEmpty &&
-        state.translatedText != translationPlaceholder &&
-        !state.translatedText.startsWith('Terjemahan')) {
-      setCompleted();
-      return;
-    }
-
     // Bahasa sama → jangan translate.
     if (fromCode == toCode) {
-      _lastTranslatedSource = sourceText;
       state = state.copyWith(
         speakerText: sourceText,
         translatedText: sourceText,
@@ -620,13 +647,15 @@ class ConversationNotifier extends StateNotifier<ConversationState> {
     );
 
     try {
-      var translated = await _translateWithOfflineFallback(
+      final translated = await _translateWithOfflineFallback(
         sourceText,
         from: fromCode,
         to: toCode,
       );
 
-      _lastTranslatedSource = sourceText;
+      // Request baru sudah dimulai sejak translation selesai — buang hasilnya.
+      if (myId != _activeTranslationId || !mounted) return;
+
       state = state.copyWith(
         speakerText: sourceText,
         translatedText: translated,
@@ -651,15 +680,18 @@ class ConversationNotifier extends StateNotifier<ConversationState> {
       setCompleted();
     } on TimeoutException catch (e) {
       _log('[Timeout] $e');
+      if (myId != _activeTranslationId || !mounted) return;
       setError('Terjemahan timeout. Silakan coba lagi.', retryText: sourceText);
       state = state.copyWith(
         translatedText: 'Terjemahan timeout. Silakan coba lagi.',
       );
     } on TranslationException catch (e) {
       _log('[Translation API] $e');
+      if (myId != _activeTranslationId || !mounted) return;
       setError(e.message, retryText: sourceText);
       state = state.copyWith(translatedText: e.message);
     } catch (e) {
+      if (myId != _activeTranslationId || !mounted) return;
       final msg = '$e';
       if (msg.toLowerCase().contains('socketexception') ||
           msg.toLowerCase().contains('failed host lookup')) {
@@ -827,7 +859,9 @@ class ConversationNotifier extends StateNotifier<ConversationState> {
   }
 
   void startListening() {
-    _lastTranslatedSource = null;
+    // Increment Request ID agar jika ada translate() in-flight dari sebelum
+    // sesi mic dimulai, result-nya tidak akan menimpa state sesi baru ini.
+    _activeTranslationId++;
     state = state.copyWith(
       phase: ConversationPhase.listening,
       isSpeakerDraft: true,
@@ -859,6 +893,10 @@ class ConversationNotifier extends StateNotifier<ConversationState> {
     // Bersihkan semua resource — penting untuk sesi panjang (2–4 jam).
     _translateDebounce?.cancel();
     _translateDebounce = null;
+    // Increment IDs agar semua await yang masih in-flight tidak mengupdate
+    // state setelah notifier di-dispose.
+    _activeTranslationId++;
+    _sessionId++;
     _speechQueue.clear();
     _isProcessingQueue = false;
     _offlineTranslator.dispose();

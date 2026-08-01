@@ -572,4 +572,36 @@ class SpeechService {
     _localeFallbackChain = [];
     await _speech.cancel();
   }
+
+  /// Hentikan STT engine dan lepaskan semua callback.
+  ///
+  /// Harus dipanggil dari [State.dispose] milik widget yang menggunakan
+  /// SpeechService agar:
+  /// - engine SpeechRecognizer native benar-benar berhenti
+  /// - tidak ada callback (_onResult, _onStatus, _onError) yang memanggil
+  ///   setState / ref.read setelah widget sudah unmounted
+  /// - tidak ada resource microphone yang tertinggal aktif
+  Future<void> dispose() async {
+    // 1. Null-kan semua callback terlebih dahulu agar event native yang
+    //    mungkin masih in-flight tidak memanggil widget yang sudah dispose.
+    _onResult = null;
+    _onStatus = null;
+    _onError = null;
+    _onSoundLevel = null;
+
+    // 2. Reset state internal.
+    _manualControl = false;
+    _isRetryingLocale = false;
+    _localeFallbackChain = [];
+    _localeFallbackIndex = 0;
+
+    // 3. Hentikan / cancel engine STT native.
+    try {
+      if (_speech.isListening) {
+        await _speech.cancel();
+      }
+    } catch (_) {
+      // Abaikan error saat dispose — widget sudah tidak aktif.
+    }
+  }
 }

@@ -4,7 +4,7 @@ import 'package:flutter/foundation.dart' show debugPrint, kDebugMode, kIsWeb;
 import 'package:flutter_tts/flutter_tts.dart';
 
 typedef TtsCompletionCallback = void Function();
-typedef TtsErrorCallback = void Function(String message);
+typedef TtsErrorCallback = void Function(String message, {bool isMissingVoice});
 
 void _log(String message) {
   if (kDebugMode) debugPrint(message);
@@ -16,6 +16,11 @@ class TtsService {
   TtsCompletionCallback? _onComplete;
   TtsCompletionCallback? _onStart;
   TtsErrorCallback? _onError;
+
+  // Cached state for logging
+  String _currentEngine = 'Unknown';
+  List<dynamic> _availableLanguages = [];
+  List<dynamic> _availableVoices = [];
 
   TtsService() {
     _initFuture = _initTts();
@@ -30,8 +35,24 @@ class TtsService {
         );
         if (hasGoogle) {
           await _tts.setEngine('com.google.android.tts');
+          _currentEngine = 'com.google.android.tts';
+        } else {
+          _currentEngine = await _tts.getDefaultEngine ?? 'Unknown';
         }
+      } else if (!kIsWeb && Platform.isIOS) {
+        _currentEngine = 'iOS Default';
+        await _tts.setIosAudioCategory(
+          IosTextToSpeechAudioCategory.playback,
+          [
+            IosTextToSpeechAudioCategoryOptions.allowBluetooth,
+            IosTextToSpeechAudioCategoryOptions.allowBluetoothA2DP,
+            IosTextToSpeechAudioCategoryOptions.mixWithOthers,
+          ],
+        );
       }
+
+      _availableLanguages = await _tts.getLanguages;
+      _availableVoices = await _tts.getVoices;
 
       await _tts.awaitSpeakCompletion(true);
       await _tts.setVolume(1.0);
@@ -43,8 +64,8 @@ class TtsService {
       _tts.setCompletionHandler(() => _onComplete?.call());
       _tts.setCancelHandler(() => _onComplete?.call());
       _tts.setErrorHandler((msg) {
-        _log('[TTS] error: $msg');
-        _onError?.call('Suara gagal diputar. Unduh paket suara di pengaturan HP.');
+        _log('[TTS] Error from handler: $msg');
+        _onError?.call('Suara gagal diputar. Unduh paket suara di pengaturan HP.', isMissingVoice: false);
       });
     } catch (e) {
       _log('[TTS] init failed: $e');
@@ -76,51 +97,91 @@ class TtsService {
     await _ensureReady();
     await _tts.stop();
 
-    final locale = await _resolveLocale(
+    final requestedLocale = await _resolveLocale(
       languageCode: languageCode,
       speechCode: speechCode,
     );
 
-    final langOk = await _applyLanguage(locale);
-    if (!langOk) {
-      _log('[TTS] language not available: $locale');
+    _log('\n[TTS]\nEngine: $_currentEngine\nAvailable Languages: ${_availableLanguages.length} items\nAvailable Voices: ${_availableVoices.length} items\nRequested Locale: $requestedLocale');
+
+    try {
+      final String? finalLocale = await _applyLanguage(requestedLocale);
+      
+      _log('Resolved Locale: $finalLocale');
+
+      if (finalLocale == null) {
+        _log('Speak Result: 0 (Language/Voice not available)');
+        _log('Error: Missing voice for $requestedLocale');
+        
+        if (notifyOnError) {
+          _onError?.call(
+            'Paket suara Mandarin belum tersedia.\nSilakan buka: Settings → Google Text-to-Speech → Install Chinese (Simplified).',
+            isMissingVoice: true,
+          );
+        }
+        return false;
+      }
+
+      // Ensure volume is up
+      await _tts.setVolume(1.0);
+      await _tts.setPitch(1.0);
+      await _tts.setSpeechRate(0.48);
+
+      final result = await _tts.speak(trimmed);
+      _log('Speak Result: $result');
+      
+      final ok = result == 1;
+      if (!ok && notifyOnError) {
+        _onError?.call('Suara tidak dapat diputar. Cek volume HP dan paket suara.', isMissingVoice: false);
+      }
+      return ok;
+    } catch (e, st) {
+      _log('Speak Result: 0 (Exception)');
+      _log('Error: $e\n$st');
       if (notifyOnError) {
-        _onError?.call(
-          'Paket suara belum terpasang. Buka Settings → Google TTS → '
-          'Install voice data untuk bahasa tujuan.',
-        );
+        _onError?.call('Terjadi kesalahan saat memutar suara.', isMissingVoice: false);
       }
       return false;
     }
-
-    final result = await _tts.speak(trimmed);
-    final ok = result == 1;
-    if (!ok && notifyOnError) {
-      _onError?.call('Suara tidak dapat diputar. Cek volume HP dan paket suara.');
-    }
-    return ok;
   }
 
-  Future<bool> _applyLanguage(String locale) async {
-    var result = await _tts.setLanguage(locale);
-    if (result == 1) return true;
+  /// Tries to set the language. Returns the exact locale that worked, or null if failed.
+  Future<String?> _applyLanguage(String locale) async {
+    bool isAvailable = await _tts.isLanguageAvailable(locale);
+    if (isAvailable) {
+      final res = await _tts.setLanguage(locale);
+      if (res == 1) return locale;
+    }
 
     // Coba varian locale (umum di Android untuk Mandarin).
     for (final alt in _localeAlternatives(locale)) {
-      result = await _tts.setLanguage(alt);
-      if (result == 1) return true;
+      isAvailable = await _tts.isLanguageAvailable(alt);
+      if (isAvailable) {
+        final res = await _tts.setLanguage(alt);
+        if (res == 1) return alt;
+      }
     }
-    return false;
+    
+    // Jika tidak ada varian yang cocok dan ini adalah bahasa Mandarin (zh/zh-CN),
+    // kita JANGAN fallback ke bahasa Inggris atau Indonesia.
+    if (locale.toLowerCase().startsWith('zh')) {
+       // Abaikan fallback ke en/id, kembalikan null untuk trigger dialog missing voice.
+       return null;
+    }
+    
+    return null;
   }
 
   List<String> _localeAlternatives(String locale) {
     switch (locale.toLowerCase()) {
       case 'zh-cn':
-        return ['cmn-CN', 'cmn_CN', 'zh_CN', 'zh-CN'];
+        return ['cmn-CN', 'cmn_CN', 'zh_CN', 'zh-CN', 'zh'];
+      case 'zh':
+        return ['zh-CN', 'cmn-CN', 'zh_CN', 'cmn_CN'];
       case 'id-id':
-        return ['id_ID', 'in-ID', 'in_ID'];
+        return ['id_ID', 'in-ID', 'in_ID', 'id'];
       case 'en-us':
-        return ['en_US', 'en-GB', 'en_GB'];
+        return ['en_US', 'en-GB', 'en_GB', 'en'];
       default:
         return [locale.replaceAll('-', '_'), locale.replaceAll('_', '-')];
     }
@@ -156,5 +217,8 @@ class TtsService {
 
   Future<void> dispose() async {
     await _tts.stop();
+    _onStart = null;
+    _onComplete = null;
+    _onError = null;
   }
 }

@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import 'translation_text_processor.dart';
 import 'language_detector.dart';
 import 'iwip_glossary_processor.dart';
+import 'language_mapper.dart';
 
 void _log(String message) {
   if (kDebugMode) debugPrint(message);
@@ -56,25 +57,27 @@ class TranslationService {
 
   String _myMemoryCode(String code) => _myMemoryCodes[code] ?? code;
 
-  /// Deteksi bahasa sumber (lokal dulu, lalu Google `sl=auto`).
-  /// Hasil: kode singkat `id` / `en` / `zh` / …
+  /// Deteksi bahasa sumber (lokal dulu, lalu Google).
+  /// Melempar error jika gagal 2x.
   Future<String> detectLanguage(String text) async {
     final input = text.trim();
-    if (input.isEmpty) return 'en';
+    if (input.isEmpty) throw const TranslationException('Unable to detect source language.');
 
     final local = LanguageDetector.detectLocal(input);
-    if (local != null) return local;
+    if (local != null) return LanguageMapper.mapToIso(local);
 
-    try {
-      final detected = await _detectGoogle(input);
-      if (detected != null && detected.isNotEmpty) {
-        return _normalizeDetectedCode(detected);
+    for (var attempt = 1; attempt <= 2; attempt++) {
+      try {
+        final detected = await _detectGoogle(input);
+        if (detected != null && detected.isNotEmpty) {
+          return LanguageMapper.mapToIso(_normalizeDetectedCode(detected));
+        }
+      } catch (e) {
+        _log('[Detect Language] attempt $attempt failed: $e');
       }
-    } catch (e) {
-      _log('[Detect Language] $e');
     }
 
-    return 'en';
+    throw const TranslationException('Unable to detect source language.');
   }
 
   String _normalizeDetectedCode(String raw) {
@@ -116,19 +119,41 @@ class TranslationService {
     required String from,
     required String to,
   }) async {
-    var input = TranslationTextProcessor.prepare(text, from);
+    var input = text.trim();
     if (input.isEmpty) return '';
 
-    if (from == to) return input;
+    String mappedSource;
+    if (LanguageMapper.isAuto(from)) {
+      mappedSource = await detectLanguage(input);
+      _log('Detected Language: $mappedSource');
+    } else {
+      mappedSource = LanguageMapper.mapToIso(from);
+    }
+    
+    final mappedTarget = LanguageMapper.mapToIso(to);
+    
+    if (mappedSource.isEmpty || mappedTarget.isEmpty || LanguageMapper.isAuto(mappedSource) || LanguageMapper.isAuto(mappedTarget)) {
+      throw const TranslationException('Invalid source or target language.');
+    }
+
+    input = TranslationTextProcessor.prepare(input, mappedSource);
+    if (input.isEmpty) return '';
+
+    if (mappedSource == mappedTarget) return input;
+    
+    _log('=========================================');
+    _log('[Translation Pipeline] Validated Request');
+    _log('Mapped Source: $mappedSource');
+    _log('Mapped Target: $mappedTarget');
 
     String result;
     if (input.length > _chunkSize) {
        _log(
         '[Translation API] chunking ${input.length} chars into parts of ~$_chunkSize',
       );
-      result = await _translateChunked(input, from, to);
+      result = await _translateChunked(input, mappedSource, mappedTarget);
     } else {
-      result = await _translateWithRetry(input, from, to);
+      result = await _translateWithRetry(input, mappedSource, mappedTarget);
     }
     
     // Koreksi glosarium pasca-terjemahan
@@ -254,7 +279,6 @@ class TranslationService {
       if (_geminiApiKey.isNotEmpty) () => _translateGemini(input, from, to),
       if (_cloudApiKey.isNotEmpty) () => _translateCloudOfficial(input, from, to),
       () => _translateGoogle(input, from, to),
-      if (from != 'auto') () => _translateGoogle(input, 'auto', to),
       () => _translateMyMemory(input, from, to),
     ];
 
@@ -300,11 +324,12 @@ class TranslationService {
     final body = <String, dynamic>{
       'q': text,
       'target': _googleCode(to),
+      'source': _googleCode(from),
       'format': 'text',
     };
-    if (from != 'auto') {
-      body['source'] = _googleCode(from);
-    }
+    
+    _log('[Cloud Official] Request URL: $uri');
+    _log('[Cloud Official] Request Body: ${jsonEncode(body)}');
 
     final response = await http
         .post(
@@ -316,6 +341,8 @@ class TranslationService {
           body: jsonEncode(body),
         )
         .timeout(_requestTimeout);
+        
+    _log('[Cloud Official] API Response Status: ${response.statusCode}');
 
     if (response.statusCode != 200) {
       throw TranslationException(
@@ -354,13 +381,14 @@ class TranslationService {
 
     final systemInstruction = '''
 Anda adalah penerjemah ahli untuk perusahaan pertambangan nikel dan smelter (PT IWIP) di Indonesia.
-Tugas Anda: Menerjemahkan percakapan. Bahasa target: $to.
+Tugas Anda: Menerjemahkan teks (rambu, dokumen, instruksi kerja, label) dan percakapan. Bahasa target: $to.
 Aturan:
-1. Terjemahkan berdasarkan KONTEKS KALIMAT, BUKAN kata per kata (harfiah).
-2. Jika menerjemahkan ke Mandarin (zh), gunakan Simplified Chinese (Mainland China) dengan tata bahasa yang alami, umum digunakan sehari-hari, dan mudah dipahami oleh penutur asli di lingkungan kerja.
-3. Gunakan istilah yang biasa dipakai di lingkungan kerja, pabrik, dan kantor pertambangan.
-4. Pertahankan nama orang, nama perusahaan, dan istilah teknis tanpa menerjemahkannya jika itu mengubah maknanya secara keliru.
-5. Hanya berikan hasil terjemahan akhirnya saja tanpa tanda kutip, tanpa penjelasan tambahan, dan tanpa markdown.
+1. Terjemahkan berdasarkan KONTEKS INDUSTRI PERTAMBANGAN DAN PABRIK, BUKAN kata per kata.
+2. Jika menerjemahkan ke Mandarin (zh), gunakan Simplified Chinese (Mainland China) dengan tata bahasa yang alami, profesional, dan mudah dipahami oleh pekerja lokal maupun ekspatriat.
+3. Gunakan istilah teknis yang tepat (misal: "Crusher", "Smelter", "Conveyor", "PPE/APD", "Shift").
+4. Pertahankan nama orang, kode area (misal: "OB-1", "PLTU-3"), dan nama perusahaan tanpa diterjemahkan.
+5. Jika teks sumber memiliki kesalahan ketik (typo) atau singkatan tidak baku, coba pahami konteksnya dan terjemahkan maksud benarnya.
+6. Berikan hasil terjemahan langsung tanpa tanda kutip, penjelasan tambahan, atau markdown.
 ''';
 
     final body = {
@@ -380,6 +408,9 @@ Aturan:
         "temperature": 0.1,
       }
     };
+    
+    _log('[Gemini] Request URL: $uri');
+    _log('[Gemini] Request Body: ${jsonEncode(body)}');
 
     final response = await http
         .post(
@@ -390,6 +421,8 @@ Aturan:
           body: jsonEncode(body),
         )
         .timeout(_requestTimeout);
+        
+    _log('[Gemini] API Response Status: ${response.statusCode}');
 
     if (response.statusCode != 200) {
       throw TranslationException(
@@ -485,6 +518,10 @@ Aturan:
     final http.Response response;
     if (text.length >= _postLengthThreshold) {
       final uri = Uri.parse(_googleUrl).replace(queryParameters: params);
+      
+      _log('[Google Translate] Request URL: $uri');
+      _log('[Google Translate] Request Body (POST): q=$text');
+      
       response = await http
           .post(
             uri,
@@ -500,10 +537,15 @@ Aturan:
           'q': text,
         },
       );
+      
+      _log('[Google Translate] Request URL: $uri');
+      
       response = await http
           .get(uri, headers: _requestHeaders)
           .timeout(_requestTimeout);
     }
+    
+    _log('[Google Translate] API Response Status: ${response.statusCode}');
 
     if (response.statusCode != 200) {
       throw TranslationException(
@@ -547,10 +589,14 @@ Aturan:
         'de': 'dev@ilb.app',
       },
     );
+    
+    _log('[MyMemory] Request URL: $uri');
 
     final response = await http
         .get(uri, headers: _requestHeaders)
         .timeout(_requestTimeout);
+        
+    _log('[MyMemory] API Response Status: ${response.statusCode}');
 
     if (response.statusCode != 200) {
       throw TranslationException('MyMemory error (${response.statusCode})');

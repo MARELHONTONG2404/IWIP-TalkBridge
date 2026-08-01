@@ -8,20 +8,20 @@ import 'collections/history_record.dart';
 
 /// Migrasi data lama dari SharedPreferences ke Isar (sekali saja).
 class IsarMigration {
-  static const _flagKey = 'isar_migrated_v1';
+  static const flagKey = 'isar_migrated_v1';
 
   static Future<void> migrateFromSharedPreferences(
     Isar isar,
     SharedPreferences prefs,
   ) async {
-    if (prefs.getBool(_flagKey) == true) return;
+    if (prefs.getBool(flagKey) == true) return;
 
     await isar.writeTxn(() async {
       await _migrateHistory(isar, prefs);
       await _migrateFavorites(isar, prefs);
     });
 
-    await prefs.setBool(_flagKey, true);
+    await prefs.setBool(flagKey, true);
   }
 
   static Future<void> _migrateHistory(

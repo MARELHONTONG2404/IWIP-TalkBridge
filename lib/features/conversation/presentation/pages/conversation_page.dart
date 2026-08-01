@@ -57,6 +57,15 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
   bool _lowVolumeWarned = false;
   bool _earTipShown = false;
 
+  // TTS Event ID — setiap panggilan _speakTranslation() mendapat ID unik.
+  // Handler onStart/onComplete/onError hanya dieksekusi jika ID-nya masih
+  // cocok dengan event TTS yang sedang aktif. Ini mencegah:
+  //   - stale onComplete dari speak() sebelumnya (yang dibatalkan via stop())
+  //     memicu _continueManualSession() atau setCompleted() yang salah
+  //   - duplicate callback akibat race condition atau rebuild
+  // ID berbasis integer monotonic — bukan berbasis isi teks.
+  int _ttsEventId = 0;
+
   bool get _isMobile => !kIsWeb && (Platform.isAndroid || Platform.isIOS);
 
   /// Session dari route extra (jika masuk dari InterpreterSessionPage).
@@ -69,46 +78,43 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
   void initState() {
     super.initState();
     _initializeSpeech();
-    _ttsService.setHandlers(
-      onStart: () {
-        if (!mounted) return;
-        ref.read(conversationProvider.notifier).setSpeaking();
-        _showEarTipOnce();
-        
-        if (_isInterpreterMode && _manualSessionActive) {
-          _speechService.stopListening();
-        }
-      },
-      onComplete: () {
-        if (!mounted) return;
-        ref.read(conversationProvider.notifier).setCompleted();
-        
-        if (_isInterpreterMode && _manualSessionActive && !_userRequestedStop) {
-          _continueManualSession();
-        }
-      },
-      onError: (message) {
-        if (!mounted) return;
-        _log('[TTS] $message');
-      },
-    );
+    // TTS handlers disetel per-speak di dalam _speakTranslation()
+    // menggunakan TTS Event ID agar callback dari speak() sebelumnya
+    // yang dibatalkan tidak menginterferensi sesi TTS yang baru.
   }
 
   @override
   void dispose() {
-    _scrollController.dispose();
+    // 1. Set flag guard terlebih dahulu agar loop async (_continueManualSession,
+    //    _finalizeSpeechAndTranslate) yang mungkin masih berjalan langsung
+    //    menghentikan eksekusinya saat menemukan cek !mounted atau flag ini.
+    _manualSessionActive = false;
+    _userRequestedStop = true;
+
+    // 2. Hentikan STT engine native dan lepaskan semua callback.
+    //    Menggunakan unawaited karena dispose() tidak boleh async —
+    //    cancel() berjalan fire-and-forget. Callback sudah di-null sebelum
+    //    cancel() di dalam SpeechService.dispose(), sehingga tidak ada
+    //    event STT yang bisa memanggil widget ini setelahnya.
+    _speechService.dispose();
+
+    // 3. Hentikan TTS dan lepaskan semua callback handler.
     _ttsService.dispose();
-    // Jika sedang dalam sesi interpreter, akhiri sesi saat halaman ditutup.
-    // Ini memastikan tidak ada state yang bocor jika user keluar.
+
+    // 4. Akhiri sesi interpreter jika aktif.
+    //    ref masih valid di sini — ini dipanggil sebelum super.dispose().
+    //    StateNotifierProvider bertahan lebih lama dari widget, sehingga
+    //    pemanggilan synchronous ini lebih aman daripada Future.microtask
+    //    yang memanggil ref setelah widget benar-benar unmounted.
     if (_isInterpreterMode) {
-      // Gunakan future.microtask agar tidak memanggil ref setelah widget
-      // unmounted secara tidak aman.
-      Future.microtask(() {
-        try {
-          ref.read(conversationProvider.notifier).endInterpreterSession();
-        } catch (_) {}
-      });
+      try {
+        ref.read(conversationProvider.notifier).endInterpreterSession();
+      } catch (_) {
+        // Defensive: abaikan jika provider sudah tidak tersedia.
+      }
     }
+
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -185,9 +191,9 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
             _continueManualSession();
             return;
           }
-          if (_userRequestedStop) {
-            _finalizeSpeechAndTranslate();
-          }
+          // Catatan: kasus _userRequestedStop ditangani oleh _stopListening()
+          // yang memanggil _finalizeSpeechAndTranslate() secara eksplisit.
+          // Tidak ada duplicate call di sini.
         }
       },
     );
@@ -306,6 +312,7 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
 
     if (!_speechReady) {
       await _initializeSpeech();
+      if (!mounted) return;
       if (!_speechReady) {
         _showMessage(
           _micHelpMessage(_speechService.lastError),
@@ -328,6 +335,9 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
       _userRequestedStop = false;
       _manualSessionActive = true;
       _lowVolumeWarned = false;
+      // Increment TTS Event ID agar onComplete/onStart dari speak() sebelumnya
+      // yang mungkin masih in-flight tidak menginterferensi sesi baru ini.
+      _ttsEventId++;
     });
 
     notifier.startListening();
@@ -492,14 +502,72 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
 
   Future<void> _speakTranslation(
     String text,
-    LanguageModel language, {
-    bool notifyOnError = false,
-  }) async {
+    LanguageModel language,
+  ) async {
+    // TTS Event ID: setiap panggilan speak mendapat ID unik.
+    // Handler hanya dijalankan jika ID masih cocok — ID yang tidak cocok
+    // berarti ada speak() baru yang sudah menggantikan speak() ini.
+    // Ini mencegah duplicate callback akibat race condition atau rebuild.
+    final myEventId = ++_ttsEventId;
+
+    _ttsService.setHandlers(
+      onStart: () {
+        if (!mounted || myEventId != _ttsEventId) return;
+        ref.read(conversationProvider.notifier).setSpeaking();
+        _showEarTipOnce();
+        // Hentikan STT saat TTS mulai berbicara (mode interpreter)
+        // agar mic tidak menangkap audio TTS.
+        if (_isInterpreterMode && _manualSessionActive) {
+          _speechService.stopListening();
+        }
+      },
+      onComplete: () {
+        if (!mounted || myEventId != _ttsEventId) return;
+        ref.read(conversationProvider.notifier).setCompleted();
+        // Lanjutkan sesi mic setelah TTS selesai (mode interpreter).
+        if (_isInterpreterMode && _manualSessionActive && !_userRequestedStop) {
+          _continueManualSession();
+        }
+      },
+      onError: (message, {isMissingVoice = false}) {
+        if (!mounted || myEventId != _ttsEventId) return;
+        _log('[TTS] $message');
+        if (isMissingVoice) {
+          _showMissingVoiceDialog(message);
+        } else {
+          _showMessage(message);
+        }
+      },
+    );
+
     await _ttsService.speak(
       text,
       languageCode: language.code,
       speechCode: language.speechCode,
-      notifyOnError: notifyOnError,
+      notifyOnError: true,
+    );
+  }
+
+  void _showMissingVoiceDialog(String message) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Paket Suara Tidak Tersedia'),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(context);
+              openAppSettings(); // Requires permission_handler
+            },
+            child: const Text('Open Settings'),
+          ),
+        ],
+      ),
     );
   }
 

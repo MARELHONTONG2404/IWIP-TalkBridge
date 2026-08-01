@@ -11,6 +11,7 @@ class HomePage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    debugPrint('--- AUDIT: HomePage build() called');
     final theme = Theme.of(context);
     final settings = ref.watch(settingsProvider);
     

@@ -141,6 +141,21 @@ class TranslationTextProcessor {
       'dr': 'dari',
       'utk': 'untuk',
       'krj': 'kerja',
+      'skrg': 'sekarang',
+      'skrng': 'sekarang',
+      'skr': 'sekarang',
+      'bkn': 'bukan',
+      'msh': 'masih',
+      'smpe': 'sampai',
+      'aj': 'saja',
+      'aja': 'saja',
+      'lg': 'lagi',
+      'kt': 'kita',
+      'td': 'tadi',
+      'dl': 'dulu',
+      'pd': 'pada',
+      'ttg': 'tentang',
+      'sbg': 'sebagai',
       // ── Sapaan salah ejaan ──────────────────────────────────────────────
       'salamat pagi': 'Selamat pagi',
       'salamat siang': 'Selamat siang',
@@ -177,13 +192,39 @@ class TranslationTextProcessor {
       'database',
       'wifi',
       'internet',
+      'google',
+      'microsoft',
+      'smelter',
+      'crusher',
+      'conveyor',
     ];
     
     for (final noun in properNouns) {
-      final capitalized = noun.split(' ').map((w) => w.isNotEmpty ? '\${w[0].toUpperCase()}\${w.substring(1)}' : '').join(' ');
+      final capitalized = noun.split(' ').map((w) => w.isNotEmpty ? '${w[0].toUpperCase()}${w.substring(1)}' : '').join(' ');
       normalized = normalized.replaceAllMapped(
         RegExp(r'\b' + RegExp.escape(noun) + r'\b', caseSensitive: false),
         (match) => capitalized,
+      );
+    }
+
+    // Singkatan khusus industri (Full Caps)
+    const industrialAbbr = [
+      'pltu',
+      'ob',
+      'wbn',
+      'hms',
+      'apd',
+      'ppe',
+      'loto',
+      'ptw',
+      'jsa',
+      'k3',
+    ];
+
+    for (final abbr in industrialAbbr) {
+      normalized = normalized.replaceAllMapped(
+        RegExp(r'\b' + RegExp.escape(abbr) + r'\b', caseSensitive: false),
+        (match) => abbr.toUpperCase(),
       );
     }
 

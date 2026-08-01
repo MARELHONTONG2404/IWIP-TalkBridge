@@ -1,10 +1,12 @@
 import 'dart:async';
-
+import 'dart:io';
+import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import '../../../../core/services/cloud_vision_ocr_service.dart';
 import '../../../../core/services/translation_service.dart';
@@ -13,66 +15,134 @@ import '../../favorite/providers/favorite_provider.dart';
 import '../../history/providers/history_provider.dart';
 import '../../language/data/language_model.dart';
 import '../../settings/providers/settings_provider.dart';
+import '../../../../core/services/text_quality_validator.dart';
+import '../../../../core/services/image_enhancement_service.dart';
 import 'widgets/language_selector_camera.dart';
 
-/// Mode stabil A14:
-/// - Latin (ID/EN): ML Kit on-device
-/// - Mandarin/CJK: Cloud Vision (hindari model Chinese lokal yang OOM/crash)
-const String _kOcrFailMessage =
-    'Teks tidak dapat dikenali. Silakan ambil foto yang lebih jelas.';
-const String _kChineseFallbackMessage =
-    'Tulisan Mandarin belum terbaca.\n'
-    'Coba foto lebih jelas, atau ketik/tempel di menu Translate.';
-const String _kVisionNoKeyMessage =
-    'OCR Mandarin butuh Google API key (Cloud Vision).\n'
-    'Jalankan app dengan:\n'
-    '--dart-define=GOOGLE_TRANSLATE_API_KEY=YOUR_KEY\n'
-    'Atau ketik/tempel teks di menu Translate.';
-const String _kVisionDisabledMessage =
-    'Cloud Vision API belum aktif untuk API key ini.\n'
-    'Aktifkan Vision API di Google Cloud, lalu coba lagi.\n'
-    'Sementara: ketik/tempel di menu Translate.';
+const String _kOcrFailMessage = 'Teks tidak dapat dikenali.\nSilakan arahkan kamera lebih dekat.';
+const String _kChineseFallbackMessage = 'Tulisan Mandarin belum terbaca.\nCoba foto lebih dekat dan jelas.';
+const String _kVisionNoKeyMessage = 'OCR Mandarin butuh Google API key (Cloud Vision).\nJalankan app dengan:\n--dart-define=GOOGLE_TRANSLATE_API_KEY=YOUR_KEY\nAtau ketik/tempel teks di menu Translate.';
+const String _kVisionDisabledMessage = 'Cloud Vision API belum aktif untuk API key ini.\nAktifkan Vision API di Google Cloud, lalu coba lagi.';
 
 class CameraTranslatePage extends ConsumerStatefulWidget {
   const CameraTranslatePage({super.key});
 
   @override
-  ConsumerState<CameraTranslatePage> createState() =>
-      _CameraTranslatePageState();
+  ConsumerState<CameraTranslatePage> createState() => _CameraTranslatePageState();
 }
 
 class _CameraTranslatePageState extends ConsumerState<CameraTranslatePage> {
+  // --- Camera Engine State ---
+  CameraController? _cameraController;
+  final ValueNotifier<bool> _isCameraInitialized = ValueNotifier(false);
+  final ValueNotifier<bool> _isFlashOn = ValueNotifier(false);
+  
+  // --- UI State ---
+  final ValueNotifier<int> _currentModeIndex = ValueNotifier(1); // 0: Instant, 1: Scan, 2: Import
+  final ValueNotifier<String> _recognizedText = ValueNotifier('');
+  final ValueNotifier<String> _translatedText = ValueNotifier('');
+  final ValueNotifier<bool> _busy = ValueNotifier(false);
+  LanguageModel _sourceLang = LanguageSelectorCamera.autoDetect;
+  LanguageModel _targetLang = languageByCode('zh');
+
+  // --- Services ---
   TextRecognizer? _latinRecognizer;
   final _translationService = TranslationService();
   final _ttsService = TtsService();
   final _picker = ImagePicker();
   final _cloudOcr = CloudVisionOcrService();
 
-  String _recognizedText = '';
-  String _translatedText = '';
-  bool _isRecognizing = false;
-  bool _isTranslating = false;
-  bool _busy = false;
-  String _errorMessage = '';
+  // --- Optimization Caches ---
   CloudVisionOcrFailure _lastCloudFailure = CloudVisionOcrFailure.none;
-
-  LanguageModel _sourceLang = LanguageSelectorCamera.autoDetect;
-  // Default tujuan 中文 — cocok untuk interaksi dengan pekerja China di IWIP.
-  LanguageModel _targetLang = languageByCode('zh');
+  String _lastOcrHash = '';
+  Timer? _instantModeTimer;
+  double _minAvailableZoom = 1.0;
+  double _maxAvailableZoom = 1.0;
+  double _currentZoomLevel = 1.0;
+  double _baseZoomLevel = 1.0;
 
   @override
   void initState() {
     super.initState();
+    _initCamera();
+    
+    _currentModeIndex.addListener(() {
+      if (_currentModeIndex.value == 0) {
+        _startInstantTimer();
+      } else {
+        _stopInstantTimer();
+        _recognizedText.value = '';
+        _translatedText.value = '';
+      }
+    });
+  }
+
+  Future<void> _initCamera() async {
+    try {
+      final cameras = await availableCameras();
+      if (cameras.isNotEmpty) {
+        // Back Camera Default
+        final backCamera = cameras.firstWhere(
+          (c) => c.lensDirection == CameraLensDirection.back,
+          orElse: () => cameras[0],
+        );
+        
+        _cameraController = CameraController(
+          backCamera,
+          ResolutionPreset.high,
+          enableAudio: false,
+          imageFormatGroup: ImageFormatGroup.jpeg,
+        );
+        
+        await _cameraController!.initialize();
+        
+        // Auto Focus & Exposure defaults
+        await _cameraController!.setFocusMode(FocusMode.auto);
+        await _cameraController!.setExposureMode(ExposureMode.auto);
+        
+        _minAvailableZoom = await _cameraController!.getMinZoomLevel();
+        _maxAvailableZoom = await _cameraController!.getMaxZoomLevel();
+
+        if (mounted) {
+          _isCameraInitialized.value = true;
+        }
+      }
+    } catch (e) {
+      debugPrint('Camera init error: $e');
+    }
   }
 
   @override
   void dispose() {
+    _stopInstantTimer();
+    _cameraController?.dispose();
     _latinRecognizer?.close();
-    _latinRecognizer = null;
+    _isCameraInitialized.dispose();
+    _isFlashOn.dispose();
+    _currentModeIndex.dispose();
+    _recognizedText.dispose();
+    _translatedText.dispose();
+    _busy.dispose();
     _ttsService.dispose();
     super.dispose();
   }
 
+  // --- Instant Mode Timer (Battery Optimized) ---
+  void _startInstantTimer() {
+    _instantModeTimer?.cancel();
+    // Run every 2 seconds to balance responsiveness and battery/performance
+    _instantModeTimer = Timer.periodic(const Duration(seconds: 2), (timer) {
+      if (_currentModeIndex.value == 0 && !_busy.value && _isCameraInitialized.value) {
+        _captureAndProcess(source: ImageSource.camera, isInstant: true);
+      }
+    });
+  }
+  
+  void _stopInstantTimer() {
+    _instantModeTimer?.cancel();
+  }
+
+  // --- OCR Pipeline: Text Cleaning & Validation ---
   Future<void> _closeLatinRecognizer() async {
     final prev = _latinRecognizer;
     _latinRecognizer = null;
@@ -85,15 +155,7 @@ class _CameraTranslatePageState extends ConsumerState<CameraTranslatePage> {
 
   bool _isJunkOcrText(String text) {
     final lower = text.toLowerCase();
-    const markers = [
-      'camerax',
-      'camera2',
-      'androidx.camera',
-      'exception',
-      'stacktrace',
-      'stack trace',
-      'fatal exception',
-    ];
+    const markers = ['camerax', 'camera2', 'androidx.camera', 'exception', 'stacktrace', 'fatal exception'];
     for (final m in markers) {
       if (lower.contains(m)) return true;
     }
@@ -113,28 +175,46 @@ class _CameraTranslatePageState extends ConsumerState<CameraTranslatePage> {
           final meaningful = RegExp(
             r'[A-Za-z0-9\u00C0-\u024F\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]',
           ).allMatches(line).length;
-          return meaningful >= 1;
+          return meaningful >= 1; // At least one meaningful char per line
         })
         .toList();
 
-    return lines.join('\n').trim();
+    if (lines.isEmpty) return '';
+
+    final buffer = StringBuffer();
+    for (int i = 0; i < lines.length; i++) {
+      final line = lines[i];
+      buffer.write(line);
+      
+      if (i < lines.length - 1) {
+        final lastChar = line.substring(line.length - 1);
+        final isSentenceEnd = RegExp(r'[.!?;:。！？：]').hasMatch(lastChar);
+        
+        if (isSentenceEnd) {
+          buffer.write('\n');
+        } else {
+          // Heuristic: if current line or next line has CJK, don't add space between them
+          final hasCjk = RegExp(r'[\u4e00-\u9fff]').hasMatch(line) || 
+                         RegExp(r'[\u4e00-\u9fff]').hasMatch(lines[i+1]);
+          if (!hasCjk) {
+            buffer.write(' ');
+          }
+        }
+      }
+    }
+
+    return buffer.toString().trim();
   }
 
-  bool _isValidOcrText(String text) {
+  // Heuristic OCR Confidence Validation
+  bool _isValidOcrText(String text, [double? confidence]) {
     if (text.isEmpty) return false;
     if (_isJunkOcrText(text)) return false;
-
-    final compact = text.replaceAll(RegExp(r'\s+'), '');
-    if (compact.isEmpty) return false;
-
-    final meaningful = RegExp(
-      r'[A-Za-z0-9\u00C0-\u024F\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]',
-    ).allMatches(compact).length;
-    if (meaningful < 1) return false;
-    if (meaningful / compact.length < 0.25) return false;
-    return true;
+    
+    return TextQualityValidator.isValid(text: text, confidence: confidence);
   }
 
+  // Auto Crop based on Bounding Box (Extracted implicitly via block sorting)
   String _extractOcrText(RecognizedText recognized) {
     if (recognized.blocks.isEmpty) return recognized.text;
 
@@ -160,17 +240,15 @@ class _CameraTranslatePageState extends ConsumerState<CameraTranslatePage> {
     return linesOut.join('\n');
   }
 
-  /// OCR Latin ringan — aman di A14.
   Future<String> _ocrLatin(String path) async {
     await _closeLatinRecognizer();
-    await Future<void>.delayed(const Duration(milliseconds: 200));
+    await Future<void>.delayed(const Duration(milliseconds: 100));
 
-    final recognizer =
-        TextRecognizer(script: TextRecognitionScript.latin);
+    final recognizer = TextRecognizer(script: TextRecognitionScript.latin);
     _latinRecognizer = recognizer;
     try {
-      final recognized =
-          await recognizer.processImage(InputImage.fromFilePath(path));
+      // InputImage.fromFilePath handles EXIF orientation automatically
+      final recognized = await recognizer.processImage(InputImage.fromFilePath(path));
       return _cleanOcrText(_extractOcrText(recognized));
     } finally {
       await _closeLatinRecognizer();
@@ -181,15 +259,12 @@ class _CameraTranslatePageState extends ConsumerState<CameraTranslatePage> {
     return switch (failure) {
       CloudVisionOcrFailure.noApiKey => _kVisionNoKeyMessage,
       CloudVisionOcrFailure.apiDisabled => _kVisionDisabledMessage,
-      CloudVisionOcrFailure.imageTooLarge =>
-        'Foto terlalu besar untuk OCR cloud. Ambil ulang lebih dekat/ringan.',
-      CloudVisionOcrFailure.network =>
-        'Gagal koneksi OCR cloud. Cek internet, lalu coba lagi.',
+      CloudVisionOcrFailure.imageTooLarge => 'Foto terlalu besar. Ambil ulang lebih dekat.',
+      CloudVisionOcrFailure.network => 'Gagal koneksi. Cek internet, lalu coba lagi.',
       _ => _kChineseFallbackMessage,
     };
   }
 
-  /// OCR Mandarin/CJK lewat Cloud Vision — tidak memuat model Chinese lokal.
   Future<String?> _ocrCloudVision(String path) async {
     final result = await _cloudOcr.recognizeFile(
       path,
@@ -202,119 +277,131 @@ class _CameraTranslatePageState extends ConsumerState<CameraTranslatePage> {
 
   Future<String> _runOcrOnFile(String path) async {
     _lastCloudFailure = CloudVisionOcrFailure.none;
-    final needsCjk = _sourceLang.code == 'zh' ||
-        _sourceLang.code == 'ja' ||
-        _sourceLang.code == 'ko';
 
-    // Jangan pernah load TextRecognitionScript.chinese di A14 (crash OOM).
+    // Apply image enhancement before OCR
+    final enhancedFile = await ImageEnhancementService.enhanceImage(File(path));
+    final enhancedPath = enhancedFile.path;
+
+    final needsCjk = _sourceLang.code == 'zh' || _sourceLang.code == 'ja' || _sourceLang.code == 'ko';
+
     if (needsCjk) {
-      final cloud = await _ocrCloudVision(path);
+      final cloud = await _ocrCloudVision(enhancedPath);
       return cloud ?? '';
     }
 
     if (_sourceLang.code == 'auto') {
-      final latin = await _ocrLatin(path);
+      final latin = await _ocrLatin(enhancedPath);
       if (_isValidOcrText(latin)) return latin;
 
-      // Latin gagal → coba cloud (bisa Mandarin), tanpa model Chinese lokal.
-      final cloud = await _ocrCloudVision(path);
+      final cloud = await _ocrCloudVision(enhancedPath);
       return cloud ?? '';
     }
-
-    // id / en / dll → Latin saja
-    return _ocrLatin(path);
+    return _ocrLatin(enhancedPath);
   }
 
-  Future<void> _captureAndProcess({required ImageSource source}) async {
-    if (_busy) return;
 
-    _busy = true;
-    setState(() {
-      _isRecognizing = true;
-      _errorMessage = '';
-      _recognizedText = '';
-      _translatedText = '';
-    });
+  // --- Main Processing Pipeline ---
+  Future<void> _captureAndProcess({required ImageSource source, bool isInstant = false}) async {
+    if (_busy.value) return;
+
+    _busy.value = true;
+    if (!isInstant) {
+      _recognizedText.value = '';
+      _translatedText.value = '';
+    }
 
     try {
-      final picked = await _picker.pickImage(
-        source: source,
-        maxWidth: 800,
-        imageQuality: 65,
-        preferredCameraDevice: CameraDevice.rear,
-      );
+      String? imagePath;
+      if (source == ImageSource.camera && _currentModeIndex.value != 2) {
+        if (_cameraController != null && _cameraController!.value.isInitialized) {
+          // Pre-enhancement: Trigger Auto Focus just before capture if possible
+          try {
+             await _cameraController!.setFocusMode(FocusMode.auto);
+          } catch (_) {}
+          
+          final XFile file = await _cameraController!.takePicture();
+          imagePath = file.path;
+        } else {
+           final picked = await _picker.pickImage(
+            source: ImageSource.camera,
+            maxWidth: 1200, // High quality for OCR
+            imageQuality: 85,
+            preferredCameraDevice: CameraDevice.rear,
+          );
+          imagePath = picked?.path;
+        }
+      } else {
+        final picked = await _picker.pickImage(
+          source: ImageSource.gallery,
+          maxWidth: 1200,
+          imageQuality: 85,
+        );
+        imagePath = picked?.path;
+      }
 
       if (!mounted) return;
 
-      if (picked == null) {
-        setState(() => _errorMessage = 'Scan dibatalkan.');
+      if (imagePath == null) {
+        if (!isInstant) _showErrorSnackBar('Scan dibatalkan.');
         return;
       }
 
-      await Future<void>.delayed(const Duration(milliseconds: 600));
+      if (!isInstant) {
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+      }
       if (!mounted) return;
 
-      final cleaned = await _runOcrOnFile(picked.path);
+      // Pipeline: OCR -> Cleaning -> Extraction
+      final cleaned = await _runOcrOnFile(imagePath);
 
       if (!mounted) return;
 
+      // Pipeline: Confidence Check
       if (!_isValidOcrText(cleaned)) {
-        final needsCjk = _sourceLang.code == 'zh' ||
-            _sourceLang.code == 'ja' ||
-            _sourceLang.code == 'ko' ||
-            _sourceLang.code == 'auto';
-        setState(() {
-          _recognizedText = '';
-          _translatedText = '';
-          _errorMessage = needsCjk
-              ? _messageForCloudFailure(_lastCloudFailure)
-              : _kOcrFailMessage;
-        });
+        if (!isInstant) {
+          final needsCjk = _sourceLang.code == 'zh' || _sourceLang.code == 'ja' || _sourceLang.code == 'ko' || _sourceLang.code == 'auto';
+          final msg = needsCjk && _lastCloudFailure != CloudVisionOcrFailure.none
+                ? _messageForCloudFailure(_lastCloudFailure)
+                : _kOcrFailMessage; // Silakan arahkan kamera lebih dekat.
+                
+          _showErrorSnackBar(msg);
+        }
         return;
       }
 
-      setState(() {
-        _isRecognizing = false;
-        _recognizedText = cleaned;
-      });
-      await _translate(cleaned);
+      // Optimization: Duplicate OCR Prevention & Cache
+      final hash = cleaned.hashCode.toString() + _sourceLang.code + _targetLang.code;
+      if (isInstant && hash == _lastOcrHash && _translatedText.value.isNotEmpty) {
+        return; // Skip identical repeated OCR in instant mode
+      }
+      _lastOcrHash = hash;
+
+      _recognizedText.value = cleaned;
+      
+      // Pipeline: Translation & Industrial Glossary
+      await _translate(cleaned, isInstant: isInstant);
+      
+      if (mounted && !isInstant && _translatedText.value.isNotEmpty) {
+         _showResultBottomSheet();
+      }
+      
     } catch (_) {
-      if (mounted) {
-        setState(() {
-          _errorMessage = _kOcrFailMessage;
-          _recognizedText = '';
-          _translatedText = '';
-        });
+      if (mounted && !isInstant) {
+        _showErrorSnackBar('Terjadi kesalahan. Silakan coba lagi.');
       }
     } finally {
-      _busy = false;
+      _busy.value = false;
       await _closeLatinRecognizer();
-      if (mounted) setState(() => _isRecognizing = false);
     }
   }
 
-  Future<void> _translate(String text) async {
-    final cleaned = _cleanOcrText(text);
-    if (!_isValidOcrText(cleaned)) {
-      if (mounted) {
-        setState(() {
-          _translatedText = '';
-          _errorMessage = _kOcrFailMessage;
-        });
-      }
-      return;
-    }
-
-    setState(() {
-      _isTranslating = true;
-      _translatedText = '';
-      _errorMessage = '';
-    });
-
+  Future<void> _translate(String text, {bool isInstant = false}) async {
     try {
       final from = _sourceLang.code == 'auto' ? 'auto' : _sourceLang.code;
+      
+      // TranslationService handles Glossary and Grammar Correction via its pipeline
       final result = await _translationService.translate(
-        text: cleaned,
+        text: text,
         from: from,
         to: _targetLang.code,
       );
@@ -322,218 +409,404 @@ class _CameraTranslatePageState extends ConsumerState<CameraTranslatePage> {
       if (!mounted) return;
 
       if (result.trim().isEmpty) {
-        setState(() => _errorMessage = _kOcrFailMessage);
+        if (!isInstant) _showErrorSnackBar(_kOcrFailMessage);
         return;
       }
 
-      setState(() => _translatedText = result);
-      if (ref.read(settingsProvider).autoSaveHistory) {
-        ref.read(historyListProvider.notifier).addHistoryItem(cleaned, result);
+      _translatedText.value = result;
+      
+      if (!isInstant) {
+         if (ref.read(settingsProvider).autoSaveHistory) {
+           ref.read(historyListProvider.notifier).addHistoryItem(text, result);
+         }
       }
-      // TTS opsional — jangan await (aman memori).
-      final ttsCode = switch (_targetLang.code) {
-        'zh' => 'zh-CN',
-        'id' => 'id-ID',
-        'en' => 'en-US',
-        _ => _targetLang.code,
-      };
-      unawaited(
-        _ttsService.speak(result, languageCode: ttsCode).catchError((_) => false),
-      );
+      
+      // Auto-TTS for Scan Mode only
+      if (!isInstant) {
+        _playTts(result, _targetLang.code);
+      }
     } catch (_) {
-      if (mounted) {
-        setState(() {
-          _translatedText = '';
-          _errorMessage = 'Terjemahan gagal. Periksa koneksi internet.';
-        });
+      if (mounted && !isInstant) {
+        _showErrorSnackBar('Terjemahan gagal. Periksa koneksi internet.');
       }
-    } finally {
-      if (mounted) setState(() => _isTranslating = false);
     }
   }
 
+  void _playTts(String text, String targetCode) {
+    _ttsService.setHandlers(
+      onError: (message, {isMissingVoice = false}) {
+        if (!mounted) return;
+        if (isMissingVoice) {
+          _showMissingVoiceDialog(message);
+        } else {
+          _showErrorSnackBar(message);
+        }
+      },
+    );
+
+    final ttsCode = switch (targetCode) {
+      'zh' => 'zh-CN',
+      'id' => 'id-ID',
+      'en' => 'en-US',
+      _ => targetCode,
+    };
+
+    unawaited(
+      _ttsService.speak(text, languageCode: ttsCode, notifyOnError: true).catchError((_) => false),
+    );
+  }
+
+  void _showMissingVoiceDialog(String message) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Paket Suara Tidak Tersedia'),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(context);
+              openAppSettings();
+            },
+            child: const Text('Open Settings'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // --- UI Helpers ---
+  void _showErrorSnackBar(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Theme.of(context).colorScheme.error,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
   void _retranslate() {
-    if (_isValidOcrText(_recognizedText)) {
-      _translate(_recognizedText);
+    final text = _recognizedText.value;
+    if (_isValidOcrText(text)) {
+      _busy.value = true;
+      _translate(text).then((_) {
+         _busy.value = false;
+         if (mounted && _translatedText.value.isNotEmpty && _currentModeIndex.value != 0) {
+            _showResultBottomSheet();
+         }
+      });
     }
   }
 
   void _swapLanguages() {
-    if (_sourceLang.code == 'auto') {
-      setState(() {
+    setState(() {
+      if (_sourceLang.code == 'auto') {
         final prevTarget = _targetLang;
         _targetLang = languageByCode('id');
         _sourceLang = prevTarget;
-      });
-      _retranslate();
-      return;
-    }
-
-    setState(() {
-      final temp = _sourceLang;
-      _sourceLang = _targetLang;
-      _targetLang = temp;
+      } else {
+        final temp = _sourceLang;
+        _sourceLang = _targetLang;
+        _targetLang = temp;
+      }
     });
+    // Invalidate cache
+    _lastOcrHash = '';
     _retranslate();
   }
 
   void _copyText(String text) {
     Clipboard.setData(ClipboardData(text: text));
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Disalin ke clipboard'),
-        duration: Duration(seconds: 1),
-        behavior: SnackBarBehavior.floating,
-      ),
+      const SnackBar(content: Text('Disalin ke clipboard'), duration: Duration(seconds: 1), behavior: SnackBarBehavior.floating),
     );
   }
 
   void _shareResult() {
-    final text = _translatedText.isNotEmpty
-        ? '$_recognizedText\n\n$_translatedText'
-        : _recognizedText;
+    final text = _translatedText.value.isNotEmpty ? '${_recognizedText.value}\n\n${_translatedText.value}' : _recognizedText.value;
     if (text.isEmpty) return;
     Clipboard.setData(ClipboardData(text: text));
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Teks siap dibagikan (disalin)'),
-        duration: Duration(seconds: 2),
-        behavior: SnackBarBehavior.floating,
-      ),
+      const SnackBar(content: Text('Teks siap dibagikan (disalin)'), duration: Duration(seconds: 2), behavior: SnackBarBehavior.floating),
     );
+  }
+
+  Future<void> _toggleFlash() async {
+    if (_cameraController == null || !_cameraController!.value.isInitialized) return;
+    try {
+      final newState = !_isFlashOn.value;
+      _isFlashOn.value = newState;
+      await _cameraController!.setFlashMode(newState ? FlashMode.torch : FlashMode.off);
+    } catch (e) {
+      debugPrint('Flash error: $e');
+    }
+  }
+
+  // --- Camera Gesture Handlers (Tap to Focus, Pinch to Zoom) ---
+  void _onScaleStart(ScaleStartDetails details) {
+    _baseZoomLevel = _currentZoomLevel;
+  }
+
+  void _onScaleUpdate(ScaleUpdateDetails details) async {
+    if (_cameraController == null) return;
+    final zoom = (_baseZoomLevel * details.scale).clamp(_minAvailableZoom, _maxAvailableZoom);
+    try {
+      await _cameraController!.setZoomLevel(zoom);
+      _currentZoomLevel = zoom;
+    } catch (_) {}
+  }
+
+  void _onTapDown(TapDownDetails details, BoxConstraints constraints) async {
+    if (_cameraController == null) return;
+    final double x = details.localPosition.dx / constraints.maxWidth;
+    final double y = details.localPosition.dy / constraints.maxHeight;
+    try {
+      await _cameraController!.setFocusPoint(Offset(x, y));
+      await _cameraController!.setExposurePoint(Offset(x, y));
+    } catch (e) {
+      debugPrint('Focus error: $e');
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    final textColor = colors.onSurface;
-    final mutedTextColor = colors.onSurfaceVariant;
-    final busy = _busy || _isRecognizing || _isTranslating;
-    final hasResult = _errorMessage.isNotEmpty ||
-        _recognizedText.isNotEmpty ||
-        _translatedText.isNotEmpty ||
-        _isRecognizing ||
-        _isTranslating;
-
+    // The entire UI avoids setState for volatile tasks.
+    // We only use ValueListenableBuilder for parts that change often.
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Camera Translate'),
-        elevation: 0,
-        backgroundColor: colors.surface,
-      ),
-      body: SafeArea(
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: LanguageSelectorCamera(
-                sourceLang: _sourceLang,
-                targetLang: _targetLang,
-                onSourceChanged: (lang) {
-                  if (lang.code != 'auto' && lang == _targetLang) {
-                    _swapLanguages();
-                  } else {
-                    setState(() => _sourceLang = lang);
-                    _retranslate();
-                  }
-                },
-                onTargetChanged: (lang) {
-                  if (lang == _sourceLang) {
-                    _swapLanguages();
-                  } else {
-                    setState(() => _targetLang = lang);
-                    _retranslate();
-                  }
-                },
-                onSwap: _swapLanguages,
-              ),
-            ),
-            Expanded(
-              child: hasResult
-                  ? _buildTranslateStyleResult(colors, textColor, mutedTextColor)
-                  : _buildScanPanel(colors, busy),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: busy
-                          ? null
-                          : () => _captureAndProcess(
-                                source: ImageSource.gallery,
-                              ),
-                      icon: const Icon(Icons.photo_library_outlined),
-                      label: const Text('Galeri'),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    flex: 2,
-                    child: ElevatedButton.icon(
-                      onPressed: busy
-                          ? null
-                          : () => _captureAndProcess(
-                                source: ImageSource.camera,
-                              ),
-                      icon: const Icon(Icons.document_scanner_outlined),
-                      label: Text(busy ? 'Memproses...' : 'Scan'),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildScanPanel(ColorScheme colors, bool busy) {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16),
-      decoration: BoxDecoration(
-        color: colors.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Stack(
-        alignment: Alignment.center,
+      backgroundColor: Colors.black,
+      body: Stack(
+        fit: StackFit.expand,
         children: [
-          Center(
-            child: Container(
-              width: 280,
-              height: 168,
-              decoration: BoxDecoration(
-                border: Border.all(color: colors.primary, width: 2.5),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: busy
-                  ? const Center(child: CircularProgressIndicator())
-                  : Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(
-                            Icons.camera_alt_outlined,
-                            size: 36,
-                            color: colors.onSurfaceVariant,
-                          ),
-                          const SizedBox(height: 10),
-                          Text(
-                            'Mode stabil Samsung A14\n'
-                            'Tekan Scan → foto teks → terjemahan otomatis',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: colors.onSurfaceVariant,
-                              height: 1.35,
+          // 1. Camera Engine (Non-rebuilding)
+          ValueListenableBuilder<bool>(
+            valueListenable: _isCameraInitialized,
+            builder: (context, isInit, child) {
+              if (isInit && _cameraController != null) {
+                return LayoutBuilder(
+                  builder: (context, constraints) {
+                    return GestureDetector(
+                      onScaleStart: _onScaleStart,
+                      onScaleUpdate: _onScaleUpdate,
+                      onTapDown: (details) => _onTapDown(details, constraints),
+                      child: CameraPreview(_cameraController!),
+                    );
+                  },
+                );
+              }
+              return const Center(child: CircularProgressIndicator(color: Colors.white));
+            },
+          ),
+
+          // 2. Scanner Overlay
+          CustomPaint(painter: _ScannerOverlayPainter()),
+
+          // 3. UI Overlay
+          SafeArea(
+            child: Column(
+              children: [
+                // Header Sederhana (Logo IWIP, IWIP TalkBridge, Industrial Translator)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+                  child: Row(
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: Image.asset(
+                          'assets/images/iwip_logo_v2.jpg',
+                          height: 36,
+                          width: 36,
+                          fit: BoxFit.cover,
+                          errorBuilder: (context, error, stackTrace) => const Icon(Icons.business, color: Colors.white),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'IWIP TalkBridge',
+                              style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                            ),
+                            Text(
+                              'Industrial Translator',
+                              style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w500),
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close, color: Colors.white),
+                        onPressed: () => Navigator.of(context).pop(),
+                      ),
+                    ],
+                  ),
+                ),
+
+                // Language Selector
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  child: LanguageSelectorCamera(
+                    sourceLang: _sourceLang,
+                    targetLang: _targetLang,
+                    onSourceChanged: (lang) {
+                      if (lang.code != 'auto' && lang == _targetLang) {
+                        _swapLanguages();
+                      } else {
+                        setState(() => _sourceLang = lang);
+                        _lastOcrHash = '';
+                      }
+                    },
+                    onTargetChanged: (lang) {
+                      if (lang == _sourceLang) {
+                        _swapLanguages();
+                      } else {
+                        setState(() => _targetLang = lang);
+                        _lastOcrHash = '';
+                      }
+                    },
+                    onSwap: _swapLanguages,
+                  ),
+                ),
+                
+                const Spacer(),
+
+                // Busy Indicator
+                ValueListenableBuilder<bool>(
+                  valueListenable: _busy,
+                  builder: (context, busy, child) {
+                    if (busy) return const Padding(padding: EdgeInsets.all(16.0), child: CircularProgressIndicator(color: Colors.white));
+                    return const SizedBox.shrink();
+                  },
+                ),
+
+                // Instant Mode Result Panel (Bottom Panel)
+                ValueListenableBuilder<int>(
+                  valueListenable: _currentModeIndex,
+                  builder: (context, modeIndex, child) {
+                    if (modeIndex == 0) {
+                      return ValueListenableBuilder<String>(
+                        valueListenable: _translatedText,
+                        builder: (context, translated, child) {
+                          if (translated.isNotEmpty) {
+                            return Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+                              child: Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.all(16),
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withAlpha(200),
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: Border.all(color: Colors.white24),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    ValueListenableBuilder<String>(
+                                      valueListenable: _recognizedText,
+                                      builder: (context, recognized, _) => Text(
+                                        recognized,
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(color: Colors.white54, fontSize: 14),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      translated,
+                                      style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          }
+                          return const SizedBox.shrink();
+                        },
+                      );
+                    }
+                    return const SizedBox.shrink();
+                  },
+                ),
+
+                // Mode Selector
+                ValueListenableBuilder<int>(
+                  valueListenable: _currentModeIndex,
+                  builder: (context, modeIndex, child) {
+                    return Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        _buildModeButton(0, 'Instant', modeIndex),
+                        const SizedBox(width: 24),
+                        _buildModeButton(1, 'Scan', modeIndex),
+                        const SizedBox(width: 24),
+                        _buildModeButton(2, 'Import', modeIndex),
+                      ],
+                    );
+                  },
+                ),
+                const SizedBox(height: 24),
+
+                // Bottom Buttons (Gallery, Capture, Flash)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 32.0, left: 32.0, right: 32.0),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      // Gallery
+                      ValueListenableBuilder<bool>(
+                        valueListenable: _busy,
+                        builder: (context, busy, _) => IconButton(
+                          icon: const Icon(Icons.photo_library, color: Colors.white, size: 28),
+                          onPressed: busy ? null : () {
+                            _currentModeIndex.value = 2;
+                            _captureAndProcess(source: ImageSource.gallery);
+                          },
+                        ),
+                      ),
+                      // Capture
+                      ValueListenableBuilder<bool>(
+                        valueListenable: _busy,
+                        builder: (context, busy, _) => GestureDetector(
+                          onTap: busy ? null : () {
+                            _currentModeIndex.value = 1;
+                            _captureAndProcess(source: ImageSource.camera);
+                          },
+                          child: Container(
+                            height: 72,
+                            width: 72,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              border: Border.all(color: Colors.white, width: 4),
+                              color: Colors.white.withAlpha(76),
+                            ),
+                            child: Center(
+                              child: Container(
+                                height: 54,
+                                width: 54,
+                                decoration: const BoxDecoration(shape: BoxShape.circle, color: Colors.white),
+                              ),
                             ),
                           ),
-                        ],
+                        ),
                       ),
-                    ),
+                      // Flash
+                      ValueListenableBuilder<bool>(
+                        valueListenable: _isFlashOn,
+                        builder: (context, isFlashOn, _) => IconButton(
+                          icon: Icon(isFlashOn ? Icons.flash_on : Icons.flash_off, color: Colors.white, size: 28),
+                          onPressed: _toggleFlash,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
           ),
         ],
@@ -541,146 +814,116 @@ class _CameraTranslatePageState extends ConsumerState<CameraTranslatePage> {
     );
   }
 
-  /// Tampilkan hasil seperti halaman Translate: teks sumber besar + terjemahan.
-  Widget _buildTranslateStyleResult(
-    ColorScheme colors,
-    Color textColor,
-    Color mutedTextColor,
-  ) {
-    final favorites = ref.watch(favoriteProvider);
-    final canAct = _recognizedText.isNotEmpty &&
-        _translatedText.isNotEmpty &&
-        !_isTranslating;
-    final isFav = canAct &&
-        favorites.any(
-          (f) =>
-              f.originalText.trim().toLowerCase() ==
-                  _recognizedText.trim().toLowerCase() &&
-              f.translatedText.trim().toLowerCase() ==
-                  _translatedText.trim().toLowerCase(),
+  Widget _buildModeButton(int index, String title, int currentIndex) {
+    final isSelected = currentIndex == index;
+    return GestureDetector(
+      onTap: () => _currentModeIndex.value = index,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        decoration: isSelected ? BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(20)) : null,
+        child: Text(
+          title,
+          style: TextStyle(
+            color: isSelected ? Colors.white : Colors.white70,
+            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+          ),
+        ),
+      ),
+    );
+  }
+
+  // --- Modern Bottom Sheet for Scan/Import Modes ---
+  void _showResultBottomSheet() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => _buildBottomSheetContent(),
+    );
+  }
+
+  Widget _buildBottomSheetContent() {
+    return Consumer(
+      builder: (context, ref, _) {
+        final colors = Theme.of(context).colorScheme;
+        final favorites = ref.watch(favoriteProvider);
+        
+        final recognized = _recognizedText.value;
+        final translated = _translatedText.value;
+        
+        final isFav = favorites.any(
+          (f) => f.originalText.trim().toLowerCase() == recognized.trim().toLowerCase() &&
+                 f.translatedText.trim().toLowerCase() == translated.trim().toLowerCase(),
         );
 
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.symmetric(horizontal: 16),
-      padding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
-      decoration: BoxDecoration(
-        color: colors.surface,
-        borderRadius: BorderRadius.circular(28),
-        border: Border.all(color: colors.outlineVariant),
-      ),
-      child: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (_errorMessage.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 16),
-                child: Text(
-                  _errorMessage,
-                  style: TextStyle(
-                    fontSize: 18,
-                    height: 1.3,
-                    color: colors.error,
+        return Container(
+          decoration: BoxDecoration(
+            color: colors.surface,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+          ),
+          padding: EdgeInsets.only(left: 24, right: 24, top: 24, bottom: MediaQuery.of(context).padding.bottom + 24),
+          constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.85),
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40, height: 4, margin: const EdgeInsets.only(bottom: 24),
+                    decoration: BoxDecoration(color: colors.outlineVariant, borderRadius: BorderRadius.circular(2)),
                   ),
                 ),
-              ),
-            if (_isRecognizing) ...[
-              const LinearProgressIndicator(),
-              const SizedBox(height: 16),
-              Text(
-                'Mengenali teks...',
-                style: TextStyle(fontSize: 22, color: mutedTextColor),
-              ),
-            ] else if (_recognizedText.isNotEmpty) ...[
-              Text(
-                _recognizedText,
-                style: TextStyle(
-                  fontSize: 28,
-                  height: 1.18,
-                  fontWeight: FontWeight.w400,
-                  color: textColor,
+                Text(
+                  recognized,
+                  style: TextStyle(fontSize: 20, color: colors.onSurfaceVariant, height: 1.4),
                 ),
-              ),
-            ],
-            if (_recognizedText.isNotEmpty || _isTranslating) ...[
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 24),
-                child: Divider(color: colors.outlineVariant, height: 1),
-              ),
-            ],
-            if (_isTranslating)
-              Center(
-                child: CircularProgressIndicator(color: colors.primary),
-              )
-            else if (_translatedText.isNotEmpty) ...[
-              Text(
-                _translatedText,
-                style: TextStyle(
-                  fontSize: 27,
-                  height: 1.25,
-                  color: textColor,
+                const SizedBox(height: 16),
+                Divider(color: colors.outlineVariant),
+                const SizedBox(height: 16),
+                Text(
+                  translated,
+                  style: TextStyle(fontSize: 24, color: colors.onSurface, fontWeight: FontWeight.w500, height: 1.3),
                 ),
-              ),
-              const SizedBox(height: 14),
-              Row(
-                children: [
-                  IconButton(
-                    tooltip: 'Speak',
-                    onPressed: () => _ttsService.speak(
-                      _translatedText,
-                      languageCode: _targetLang.code,
-                    ),
-                    icon: Icon(
-                      Icons.volume_up_rounded,
-                      color: mutedTextColor,
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: 'Copy',
-                    onPressed: () => _copyText(_translatedText),
-                    icon: Icon(Icons.copy_rounded, color: mutedTextColor),
-                  ),
-                  IconButton(
-                    tooltip: 'Favorite',
-                    onPressed: () {
-                      ref.read(favoriteProvider.notifier).toggleFavorite(
-                            sourceLang: _sourceLang.name,
-                            targetLang: _targetLang.name,
-                            originalText: _recognizedText,
-                            translatedText: _translatedText,
-                          );
-                    },
-                    icon: Icon(
+                const SizedBox(height: 32),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    _buildActionButton(Icons.copy_rounded, 'Copy', () => _copyText(translated), colors),
+                    _buildActionButton(Icons.volume_up_rounded, 'Speak', () => _playTts(translated, _targetLang.code), colors),
+                    _buildActionButton(
                       isFav ? Icons.star_rounded : Icons.star_border_rounded,
-                      color: colors.primary,
+                      'Favorite',
+                      () => ref.read(favoriteProvider.notifier).toggleFavorite(
+                            sourceLang: _sourceLang.name, targetLang: _targetLang.name,
+                            originalText: recognized, translatedText: translated,
+                          ),
+                      colors,
+                      color: isFav ? colors.primary : null,
                     ),
-                  ),
-                  IconButton(
-                    tooltip: 'History',
-                    onPressed: () {
-                      ref.read(historyListProvider.notifier).addHistoryItem(
-                            _recognizedText,
-                            _translatedText,
-                          );
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Disimpan ke riwayat'),
-                          duration: Duration(seconds: 1),
-                          behavior: SnackBarBehavior.floating,
-                        ),
-                      );
-                    },
-                    icon: Icon(Icons.history_rounded, color: mutedTextColor),
-                  ),
-                  IconButton(
-                    tooltip: 'Share',
-                    onPressed: _shareResult,
-                    icon: Icon(Icons.share_rounded, color: mutedTextColor),
-                  ),
-                ],
-              ),
-            ],
+                    _buildActionButton(Icons.share_rounded, 'Share', _shareResult, colors),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildActionButton(IconData icon, String label, VoidCallback onTap, ColorScheme colors, {Color? color}) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: color ?? colors.onSurfaceVariant, size: 28),
+            const SizedBox(height: 8),
+            Text(label, style: TextStyle(color: color ?? colors.onSurfaceVariant, fontSize: 12)),
           ],
         ),
       ),
@@ -688,3 +931,29 @@ class _CameraTranslatePageState extends ConsumerState<CameraTranslatePage> {
   }
 }
 
+class _ScannerOverlayPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final backgroundPaint = Paint()..color = Colors.black54;
+    final windowWidth = size.width * 0.8;
+    final windowHeight = size.height * 0.5;
+    final clearRect = Rect.fromCenter(center: Offset(size.width / 2, size.height / 2), width: windowWidth, height: windowHeight);
+    
+    final path = Path()
+      ..addRect(Rect.fromLTWH(0, 0, size.width, size.height))
+      ..addRect(clearRect)
+      ..fillType = PathFillType.evenOdd;
+    canvas.drawPath(path, backgroundPaint);
+
+    final cornerPaint = Paint()..color = Colors.white..style = PaintingStyle.stroke..strokeWidth = 3.0;
+    const cornerLength = 30.0;
+    final r = clearRect;
+
+    canvas.drawPath(Path()..moveTo(r.left, r.top + cornerLength)..lineTo(r.left, r.top)..lineTo(r.left + cornerLength, r.top), cornerPaint);
+    canvas.drawPath(Path()..moveTo(r.right - cornerLength, r.top)..lineTo(r.right, r.top)..lineTo(r.right, r.top + cornerLength), cornerPaint);
+    canvas.drawPath(Path()..moveTo(r.left, r.bottom - cornerLength)..lineTo(r.left, r.bottom)..lineTo(r.left + cornerLength, r.bottom), cornerPaint);
+    canvas.drawPath(Path()..moveTo(r.right - cornerLength, r.bottom)..lineTo(r.right, r.bottom)..lineTo(r.right, r.bottom - cornerLength), cornerPaint);
+  }
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}

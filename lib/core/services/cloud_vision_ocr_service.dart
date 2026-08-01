@@ -17,15 +17,17 @@ class CloudVisionOcrResult {
   final String? text;
   final CloudVisionOcrFailure failure;
   final int? statusCode;
+  final double? confidence;
 
-  const CloudVisionOcrResult.ok(this.text)
+  const CloudVisionOcrResult.ok(this.text, {this.confidence})
       : failure = CloudVisionOcrFailure.none,
         statusCode = null;
 
   const CloudVisionOcrResult.fail(
     this.failure, {
     this.statusCode,
-  }) : text = null;
+  })  : text = null,
+        confidence = null;
 
   bool get isOk => failure == CloudVisionOcrFailure.none &&
       text != null &&
@@ -42,7 +44,7 @@ class CloudVisionOcrService {
   Future<CloudVisionOcrResult> recognizeFile(
     String path, {
     required String Function(String raw) clean,
-    required bool Function(String cleaned) isValid,
+    required bool Function(String cleaned, double? confidence) isValid,
   }) async {
     if (apiKey.isEmpty) {
       return const CloudVisionOcrResult.fail(CloudVisionOcrFailure.noApiKey);
@@ -133,9 +135,34 @@ class CloudVisionOcrService {
 
       // fullTextAnnotation lebih lengkap untuk DOCUMENT_TEXT_DETECTION.
       String? raw;
+      double? avgConfidence;
+
       final full = first['fullTextAnnotation'];
-      if (full is Map && full['text'] is String) {
-        raw = full['text'] as String;
+      if (full is Map) {
+        if (full['text'] is String) {
+          raw = full['text'] as String;
+        }
+        
+        // Extract confidence from pages -> blocks
+        if (full['pages'] is List) {
+          final pages = full['pages'] as List;
+          if (pages.isNotEmpty && pages.first is Map) {
+            final blocks = pages.first['blocks'];
+            if (blocks is List && blocks.isNotEmpty) {
+              double totalConfidence = 0;
+              int blockCount = 0;
+              for (final block in blocks) {
+                if (block is Map && block['confidence'] != null) {
+                  totalConfidence += (block['confidence'] as num).toDouble();
+                  blockCount++;
+                }
+              }
+              if (blockCount > 0) {
+                avgConfidence = totalConfidence / blockCount;
+              }
+            }
+          }
+        }
       } else {
         final annotations = first['textAnnotations'];
         if (annotations is List && annotations.isNotEmpty) {
@@ -149,10 +176,10 @@ class CloudVisionOcrService {
       }
 
       final cleaned = clean(raw);
-      if (!isValid(cleaned)) {
+      if (!isValid(cleaned, avgConfidence)) {
         return const CloudVisionOcrResult.fail(CloudVisionOcrFailure.empty);
       }
-      return CloudVisionOcrResult.ok(cleaned);
+      return CloudVisionOcrResult.ok(cleaned, confidence: avgConfidence);
     } catch (_) {
       return const CloudVisionOcrResult.fail(CloudVisionOcrFailure.network);
     }
