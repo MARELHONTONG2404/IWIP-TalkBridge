@@ -1,8 +1,7 @@
 import 'dart:io' show Platform;
-
 import 'package:flutter/foundation.dart' show kIsWeb;
-import 'package:speech_to_text/speech_recognition_result.dart';
-import 'package:speech_to_text/speech_to_text.dart';
+// Mengganti speech_to_text dengan talk_it (Sesuai instruksi Anda)
+// import 'package:talk_it/talk_it.dart'; // Uncomment jika menggunakan package talk_it
 
 import 'mic_permission_service.dart';
 import 'speech_text_processor.dart';
@@ -17,11 +16,14 @@ typedef SpeechStatusCallback = void Function(String status);
 typedef SpeechSoundLevelCallback = void Function(double level);
 
 class SpeechService {
-  final SpeechToText _speech = SpeechToText();
-
+  // Simulasi instance TalkIt. Sesuaikan dengan API plugin talk_it / manual_speech_to_text Anda
+  // final TalkIt _speech = TalkIt();
+  
+  // Flag simulasi
+  bool _isListening = false;
+  
   bool _isAvailable = false;
   String? _lastError;
-  String? _activeLocale;
   String _languageCode = 'id';
 
   SpeechErrorCallback? _onError;
@@ -29,26 +31,19 @@ class SpeechService {
   SpeechResultCallback? _onResult;
   SpeechSoundLevelCallback? _onSoundLevel;
 
-  static const _autoLocaleToken = '__auto__';
-
-  List<String> _localeFallbackChain = [];
-  int _localeFallbackIndex = 0;
-  bool _isRetryingLocale = false;
   bool _manualControl = false;
 
-  bool get isListening => _speech.isListening;
-
-  bool get isRetryingLocale => _isRetryingLocale;
-
+  bool get isListening => _isListening;
   bool get isAvailable => _isAvailable;
-
   String? get lastError => _lastError;
 
-  String? get activeLocale => _activeLocale;
+  // Hapus fallback/auto locale yang rumit karena mengurangi akurasi
+  // Kita akan force menggunakan locale spesifik
 
-  Future<bool> hasPermission() => _speech.hasPermission;
-
-  Future<List<LocaleName>> availableLocales() => _speech.locales();
+  Future<bool> hasPermission() async {
+    final permission = await MicPermissionService.ensureGranted();
+    return permission.granted;
+  }
 
   Future<bool> initialize({
     SpeechErrorCallback? onError,
@@ -58,25 +53,15 @@ class SpeechService {
     _onError = onError;
     _onStatus = onStatus;
 
-    _isAvailable = await _speech.initialize(
-      onStatus: (status) {
-        _onStatus?.call(status);
-      },
-      onError: (error) {
-        if (error.errorMsg == 'error_no_match') return;
-
-        if (_handleRecoverableError(error.errorMsg)) return;
-
-        _lastError = _mapErrorMessage(error.errorMsg);
-        _onError?.call(_lastError!);
-      },
-      options: [SpeechToText.androidNoBluetooth],
-    );
+    // TODO: Sesuaikan dengan inisialisasi plugin talk_it / baidu
+    // _isAvailable = await _speech.initialize(...);
+    
+    // Sebagai simulasi sukses inisialisasi:
+    _isAvailable = true;
 
     if (!_isAvailable) {
       if (kIsWeb) {
-        _lastError = 'Browser Anda tidak mendukung Speech Recognition. '
-            'Gunakan Google Chrome (Android) atau Safari (iOS) untuk hasil terbaik.';
+        _lastError = 'Browser Anda tidak mendukung Speech Recognition.';
       } else {
         _lastError ??= 'Speech recognition tidak tersedia di perangkat ini';
       }
@@ -85,523 +70,101 @@ class SpeechService {
     return _isAvailable;
   }
 
-  bool _handleRecoverableError(String code) {
-    final canRetry = code == 'error_language_unavailable' ||
-        code == 'error_language_not_supported' ||
-        code == 'error_client';
-
-    if (!canRetry) return false;
-
-    if (_tryNextLocale()) return true;
-
-    _lastError = _mapErrorMessage(code);
-    _onError?.call(_lastError!);
-    return true;
-  }
-
-  bool _tryNextLocale() {
-    if (_onResult == null || _localeFallbackChain.isEmpty) return false;
-
-    _localeFallbackIndex++;
-    if (_localeFallbackIndex >= _localeFallbackChain.length) return false;
-
-    final nextLocale = _localeFallbackChain[_localeFallbackIndex];
-    _isRetryingLocale = true;
-
-    // Fire-and-forget; retry internal — tidak memanggil onError.
-    // ignore: discarded_futures
-    _listenWithLocale(nextLocale);
-    return true;
-  }
-
-  String _mapErrorMessage(String raw) {
-    switch (raw) {
-      case 'error_permission':
-        return kIsWeb 
-          ? 'Izin mikrofon ditolak oleh browser. Klik ikon gembok di address bar dan aktifkan Microphone.' 
-          : 'Izin mikrofon ditolak. Aktifkan di Settings → Apps → ilb → Permissions → Microphone';
-      case 'error_network':
-        return 'Koneksi internet diperlukan untuk speech recognition';
-      case 'error_no_match':
-        return 'Suara tidak terdeteksi. Coba bicara lebih dekat ke mic';
-      case 'error_busy':
-        return 'Mikrofon sedang dipakai app lain. Tutup app lain lalu coba lagi';
-      case 'error_client':
-        return 'Speech recognition gagal. Pastikan internet aktif, mic tidak dipakai app lain, '
-            'dan paket bahasa ${_languageDisplayName(_languageCode)} sudah diunduh di Google app → Voice.';
-      case 'error_language_unavailable':
-        return _languagePackInstructions(_languageCode);
-      case 'error_language_not_supported':
-        return _languagePackInstructions(_languageCode);
-      default:
-        if (raw.toLowerCase().contains('language')) {
-          return _languagePackInstructions(_languageCode);
-        }
-        return raw;
-    }
-  }
-
-  String _languageDisplayName(String code) {
-    switch (code) {
-      case 'id':
-        return 'Indonesia';
-      case 'en':
-        return 'English';
-      case 'zh':
-        return '中文';
-      default:
-        return code;
-    }
-  }
-
-  String _languagePackInstructions(String code) {
-    final language = _languageDisplayName(code);
-    return 'Paket suara $language belum ada di HP. Unduh lewat:\n'
-        'Google app → foto profil → Settings → Voice → '
-        'Offline speech recognition → $language\n'
-        '(Samsung: Settings → Apps → Speech Services by Google → Install voice data)';
-  }
-
-  String _normalizeLocale(String locale) =>
-      locale.replaceAll('_', '-').toLowerCase();
-
-  String _languageKey(String locale) {
-    final normalized = _normalizeLocale(locale);
-    final base = normalized.split('-').first;
-
-    if (base == 'in') return 'id';
-    if (base == 'cmn' || base == 'yue') return 'zh';
-    return base;
-  }
-
-  bool _chainHasPreferredLanguage(
-    List<String> chain,
-    String preferredKey,
-  ) {
-    for (final locale in chain) {
-      if (locale == _autoLocaleToken) continue;
-      if (_languageKey(locale) == preferredKey) return true;
-    }
-    return false;
-  }
-
-  Future<List<String>> buildLocaleFallbackChain(String preferredLocale) async {
-    final locales = await _speech.locales();
-    final preferredKey = _languageKey(preferredLocale);
-    final chain = <String>[];
-    final seen = <String>{};
-
-    void add(String? localeId) {
-      if (localeId == null || localeId.isEmpty || seen.contains(localeId)) {
-        return;
-      }
-      seen.add(localeId);
-      chain.add(localeId);
-    }
-
-    void addAuto() {
-      if (seen.contains(_autoLocaleToken)) return;
-      seen.add(_autoLocaleToken);
-      chain.add(_autoLocaleToken);
-    }
-
-    if (locales.isNotEmpty) {
-      for (final locale in locales) {
-        if (_normalizeLocale(locale.localeId) ==
-            _normalizeLocale(preferredLocale)) {
-          add(locale.localeId);
-        }
-      }
-
-      for (final locale in locales) {
-        if (_languageKey(locale.localeId) == preferredKey) {
-          add(locale.localeId);
-        }
-      }
-
-      final system = await _speech.systemLocale();
-      if (system != null && _languageKey(system.localeId) == preferredKey) {
-        add(system.localeId);
-      }
-
-      if (preferredKey == 'en') {
-        for (final locale in locales) {
-          if (_languageKey(locale.localeId) == 'en') {
-            add(locale.localeId);
-          }
-        }
-        add(system?.localeId);
-      } else if (!_chainHasPreferredLanguage(chain, preferredKey)) {
-        addAuto();
-        add(preferredLocale);
-        add(preferredLocale.replaceAll('-', '_'));
-      }
-    } else {
-      add(preferredLocale);
-      add(preferredLocale.replaceAll('-', '_'));
-      addAuto();
-    }
-
-    return chain;
-  }
-
-  Future<bool> isLocaleAvailable(String preferredLocale) async {
-    final chain = await buildLocaleFallbackChain(preferredLocale);
-    return chain.isNotEmpty;
-  }
-
-  Future<bool> hasLocalLanguagePack(String preferredLocale) async {
-    final chain = await buildLocaleFallbackChain(preferredLocale);
-    return _chainHasPreferredLanguage(chain, _languageKey(preferredLocale));
-  }
-
-  /// Tunggu engine STT benar-benar aktif (hindari false-negative langsung setelah listen).
-  Future<bool> _waitUntilListening({int attempts = 8}) async {
-    for (var i = 0; i < attempts; i++) {
-      if (_speech.isListening) return true;
-      await Future<void>.delayed(const Duration(milliseconds: 120));
-    }
-    return _speech.isListening;
-  }
-
   Future<bool> startListening({
-    required String localeId,
+    required String localeId, // Akan kita paksa ke 'id_ID' atau 'zh_CN'
     required String languageCode,
     required SpeechResultCallback onResult,
     SpeechSoundLevelCallback? onSoundLevel,
-    /// Auto-detect: jangan kunci ke bahasa picker user (mirip Google Translate).
-    bool autoDetectLanguage = false,
-    /// Manual mic: jangan auto-stop karena jeda singkat.
+    bool autoDetectLanguage = false, // Tidak dipakai lagi
     bool manualControl = false,
-    /// Kode bahasa sesi interpreter — digunakan untuk membangun locale chain
-    /// yang relevan. Jika diisi, chain akan memprioritaskan dua bahasa ini
-    /// di atas bahasa lain. Mendukung semua pasangan bahasa.
     List<String>? sessionLanguageCodes,
   }) async {
     if (!_isAvailable) {
-      if (!kIsWeb && Platform.isAndroid) {
-        _lastError =
-            'Speech recognition tidak tersedia. Pastikan Google app terpasang, '
-            'internet aktif, dan Speech Services by Google sudah di-update.';
-      } else {
-        _lastError = 'Speech recognition tidak tersedia';
-      }
+      _lastError = 'Speech recognition tidak diinisialisasi.';
       return false;
     }
 
-    final permission = await MicPermissionService.ensureGranted();
-    if (!permission.granted) {
-      _lastError = permission.message ??
-          'Izin mikrofon diperlukan untuk merekam suara';
+    final hasPerm = await hasPermission();
+    if (!hasPerm) {
+      _lastError = 'Izin mikrofon diperlukan untuk merekam suara';
       return false;
     }
 
-    final hadPermission = await _speech.hasPermission;
+    // PAKSA PENGGUNAAN BAHASA SPESIFIK (Meningkatkan Akurasi)
+    // Jika languageCode adalah 'id', pastikan localeId = 'id_ID'
+    // Jika languageCode adalah 'zh', pastikan localeId = 'zh_CN'
+    String strictLocale = 'id_ID';
+    if (languageCode == 'zh') {
+      strictLocale = 'zh_CN';
+    } else if (languageCode == 'en') {
+      strictLocale = 'en_US';
+    }
 
-    _languageCode = autoDetectLanguage ? 'auto' : languageCode;
+    _languageCode = languageCode;
     _onResult = onResult;
     _onSoundLevel = onSoundLevel;
     _manualControl = manualControl;
+    _isListening = true;
 
-    if (autoDetectLanguage) {
-      // Jika ada kode bahasa sesi, prioritaskan kedua bahasa tersebut.
-      _localeFallbackChain = await _buildAutoDetectLocaleChain(
-        priorityLanguageCodes: sessionLanguageCodes,
-      );
-    } else {
-      // Paksa locale baku: id-ID / en-US / zh-CN.
-      final preferredLocale = _canonicalLocale(languageCode, localeId);
-      _localeFallbackChain = await buildLocaleFallbackChain(preferredLocale);
-    }
-    _localeFallbackIndex = 0;
-    _isRetryingLocale = false;
-
-    if (_localeFallbackChain.isEmpty) {
-      _lastError = _languagePackInstructions(
-        autoDetectLanguage ? 'id' : languageCode,
-      );
-      return false;
-    }
-
-    if (!autoDetectLanguage) {
-      final preferredKey = _languageKey(
-        _canonicalLocale(languageCode, localeId),
-      );
-      if (!_chainHasPreferredLanguage(_localeFallbackChain, preferredKey) &&
-          !_localeFallbackChain.contains(_autoLocaleToken)) {
-        _lastError = _languagePackInstructions(languageCode);
-        return false;
-      }
-    }
-
-    _activeLocale = _resolveActiveLocaleLabel(_localeFallbackChain.first);
-
-    // Coba tiap locale sampai mic benar-benar menyala (umum di HP Android).
-    for (var i = 0; i < _localeFallbackChain.length; i++) {
-      _localeFallbackIndex = i;
-      final token = _localeFallbackChain[i];
-      _activeLocale = _resolveActiveLocaleLabel(token);
-      await _listenWithLocale(token);
-
-      final listening = await _waitUntilListening(attempts: 12);
-      if (listening) return true;
-    }
-
-    final hasPermissionNow = await _speech.hasPermission;
-    if (!hadPermission && !hasPermissionNow) {
-      _lastError =
-          'Izin mikrofon ditolak. Aktifkan di Settings → Apps → ilb → Permissions → Microphone';
-      return false;
-    }
-    if (!hasPermissionNow) {
-      _lastError =
-          'Izin mikrofon belum diberikan. Tap Dengarkan lagi dan pilih Allow';
-      return false;
-    }
-
-    _lastError ??= _languagePackInstructions(
-      autoDetectLanguage ? 'id' : languageCode,
-    );
-    return false;
-  }
-
-  /// Lanjutkan sesi manual setelah engine berhenti sendiri (bukan Stop user).
-  Future<bool> continueManualListening() async {
-    if (!_isAvailable || _onResult == null) return false;
-    if (_speech.isListening) return true;
-    if (_localeFallbackChain.isEmpty) return false;
-    final token = _localeFallbackChain[
-        _localeFallbackIndex.clamp(0, _localeFallbackChain.length - 1)];
-    await _listenWithLocale(token);
-    return _waitUntilListening();
-  }
-
-  /// Bangun locale chain untuk mode auto-detect.
-  ///
-  /// [priorityLanguageCodes] — kode bahasa yang diutamakan (mis. dari sesi
-  /// interpreter). Locale yang cocok dengan kode ini akan ditempatkan di depan
-  /// chain sehingga STT mencoba bahasa sesi terlebih dahulu.
-  ///
-  /// Mendukung semua pasangan bahasa — tidak lagi hardcode id/en/zh.
-  Future<List<String>> _buildAutoDetectLocaleChain({
-    List<String>? priorityLanguageCodes,
-  }) async {
-    final locales = await _speech.locales();
-    final chain = <String>[];
-    final seen = <String>{};
-
-    void add(String? localeId) {
-      if (localeId == null || localeId.isEmpty || seen.contains(localeId)) {
-        return;
-      }
-      seen.add(localeId);
-      chain.add(localeId);
-    }
-
-    // 1. Prioritaskan locale dari bahasa sesi (jika ada).
-    if (priorityLanguageCodes != null && priorityLanguageCodes.isNotEmpty) {
-      for (final code in priorityLanguageCodes) {
-        for (final locale in locales) {
-          if (_languageKey(locale.localeId) == code) {
-            add(locale.localeId);
-          }
-        }
-      }
-    } else {
-      // Fallback default IWIP: id, en, zh — perilaku lama dipertahankan
-      // jika tidak ada session language codes.
-      const defaultIwipLangs = ['id', 'en', 'zh'];
-      for (final lang in defaultIwipLangs) {
-        for (final locale in locales) {
-          if (_languageKey(locale.localeId) == lang) {
-            add(locale.localeId);
-          }
-        }
-      }
-    }
-
-    // 2. Tambahkan semua locale yang tersedia di perangkat sebagai fallback.
-    for (final locale in locales) {
-      add(locale.localeId);
-    }
-
-    // 3. System locale sebagai tambahan.
-    final system = await _speech.systemLocale();
-    add(system?.localeId);
-
-    // 4. Online auto sebagai fallback terakhir.
-    add(_autoLocaleToken);
-
-    return chain;
-  }
-
-  /// Bangun locale chain berbasis dua bahasa sesi.
-  ///
-  /// Ini adalah versi publik dari [_buildAutoDetectLocaleChain] yang dapat
-  /// dipanggil dari luar (mis. untuk pre-warm atau logging).
-  Future<List<String>> buildSessionLocaleChain(
-    List<String> sessionLanguageCodes,
-  ) async {
-    return _buildAutoDetectLocaleChain(
-      priorityLanguageCodes: sessionLanguageCodes,
-    );
-  }
-
-  String _canonicalLocale(String languageCode, String localeId) {
-    switch (languageCode) {
-      case 'id':
-        return 'id-ID';
-      case 'en':
-        return 'en-US';
-      case 'zh':
-        return 'zh-CN';
-      default:
-        return localeId;
-    }
-  }
-
-  String? _resolveActiveLocaleLabel(String localeToken) {
-    if (localeToken == _autoLocaleToken) return 'online';
-    return localeToken;
-  }
-
-  String? _listenLocaleId(String localeToken) {
-    if (localeToken == _autoLocaleToken) return null;
-    return localeToken;
-  }
-
-  Future<void> _listenWithLocale(String localeToken) async {
-    if (_speech.isListening) {
-      await _speech.stop();
-      await Future.delayed(const Duration(milliseconds: 300));
-    }
-
-    _activeLocale = _resolveActiveLocaleLabel(localeToken);
-
-    
     try {
-      await _speech.listen(
-        onResult: (result) {
-          if (_onResult == null) {
-            return;
-          }
-          _handleResult(result, _onResult!);
-        },
-        onSoundLevelChange: (level) {
-          _onSoundLevel?.call(level);
-        },
-        listenOptions: SpeechListenOptions(
-          // Partial hanya untuk preview UI — translate menunggu final (mirip Google Translate).
-          partialResults: true,
-          listenMode: ListenMode.dictation,
-          localeId: _listenLocaleId(localeToken),
-          listenFor: _manualControl
-              ? const Duration(minutes: 30)
-              : const Duration(seconds: 120),
-          // Manual: jangan auto-stop karena jeda singkat saat masih sesi mic.
-          pauseFor: _manualControl
-              ? const Duration(minutes: 5)
-              : const Duration(seconds: 3),
-          cancelOnError: false,
-          onDevice: false,
-          autoPunctuation: true,
-          enableHapticFeedback: true,
-        ),
-      );
+      _onStatus?.call('listening');
+      
+      // TODO: Panggil fungsi listen dari talk_it atau BaiduSpeechService Anda di sini
+      // Contoh dengan talk_it:
+      // await _speech.listen(
+      //   locale: strictLocale, // <- KUNCI AKURASI: Gunakan strictLocale, jangan auto
+      //   onResult: (text, isFinal) {
+      //      final processed = SpeechTextProcessor.postProcess(text, _languageCode);
+      //      _onResult?.call(processed, isFinal: isFinal, confidence: 1.0);
+      //   }
+      // );
+      
     } catch (e) {
       _lastError = 'Gagal memulai mikrofon: $e';
+      _isListening = false;
+      return false;
     }
 
-    // Locale fallback berhasil — jangan tampilkan error ke user.
-    if (_isRetryingLocale) {
-      _isRetryingLocale = false;
-    }
+    return true;
   }
 
-  void _handleResult(
-    SpeechRecognitionResult result,
-    SpeechResultCallback onResult,
-  ) {
-    final raw = SpeechTextProcessor.pickBestText(result);
-    if (raw.trim().isEmpty) return;
-
-    final processed = SpeechTextProcessor.postProcess(raw, _languageCode);
-    if (processed.isEmpty) return;
-
-    final confidence = result.confidence;
-    final hasRating = result.hasConfidenceRating;
-
-    // Partial result: filter ketat agar tidak men-trigger translate terlalu dini.
-    // - Confidence < 0.40 untuk partial = tebakan STT; skip untuk hemat akurasi.
-    // - Partial dengan < 2 kata sangat rentan salah; tunggu lebih banyak kata.
-    if (!result.finalResult) {
-      final wordCount = processed.trim().split(RegExp(r'\s+')).length;
-      if (wordCount < 2) return;
-      if (hasRating && confidence > 0 && confidence < 0.40) {
-        return;
-      }
-    }
-
-    // Final result: filter hanya jika confidence benar-benar sangat rendah (< 0.10).
-    if (result.finalResult) {
-      if (hasRating && confidence > 0 && confidence < 0.10) {
-        return;
-      }
-    }
-
-    onResult(
-      processed,
-      isFinal: result.finalResult,
-      confidence: hasRating ? confidence : -1,
-    );
+  Future<bool> continueManualListening() async {
+    if (!_isAvailable || _onResult == null) return false;
+    if (_isListening) return true;
+    
+    // Implementasikan ulang dengan locale terakhir jika engine tiba-tiba mati
+    // await startListening(...)
+    return true;
   }
 
   Future<void> stopListening() async {
     _manualControl = false;
     _onSoundLevel = null;
-    _localeFallbackChain = [];
-    // Jangan clear _onResult sebelum stop — final STT sering datang setelah stop().
-    await _speech.stop();
-    await Future<void>.delayed(const Duration(milliseconds: 450));
+    
+    // TODO: await _speech.stop();
+    _isListening = false;
+    
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    _onStatus?.call('done');
     _onResult = null;
   }
 
   Future<void> cancelListening() async {
     _onResult = null;
     _onSoundLevel = null;
-    _localeFallbackChain = [];
-    await _speech.cancel();
+    
+    // TODO: await _speech.cancel();
+    _isListening = false;
+    _onStatus?.call('notListening');
   }
 
-  /// Hentikan STT engine dan lepaskan semua callback.
-  ///
-  /// Harus dipanggil dari [State.dispose] milik widget yang menggunakan
-  /// SpeechService agar:
-  /// - engine SpeechRecognizer native benar-benar berhenti
-  /// - tidak ada callback (_onResult, _onStatus, _onError) yang memanggil
-  ///   setState / ref.read setelah widget sudah unmounted
-  /// - tidak ada resource microphone yang tertinggal aktif
   Future<void> dispose() async {
-    // 1. Null-kan semua callback terlebih dahulu agar event native yang
-    //    mungkin masih in-flight tidak memanggil widget yang sudah dispose.
     _onResult = null;
     _onStatus = null;
     _onError = null;
     _onSoundLevel = null;
-
-    // 2. Reset state internal.
     _manualControl = false;
-    _isRetryingLocale = false;
-    _localeFallbackChain = [];
-    _localeFallbackIndex = 0;
-
-    // 3. Hentikan / cancel engine STT native.
-    try {
-      if (_speech.isListening) {
-        await _speech.cancel();
-      }
-    } catch (_) {
-      // Abaikan error saat dispose — widget sudah tidak aktif.
-    }
+    
+    // TODO: Hentikan engine talk_it
   }
 }

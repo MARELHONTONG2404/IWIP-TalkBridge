@@ -121,10 +121,10 @@ class LanguageSelectorCamera extends StatelessWidget {
     final sourceOptions = <LanguageModel>[_autoDetectLang, ...languages];
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+      padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(
-        color: colors.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(16),
+        color: colors.surfaceContainerHighest.withValues(alpha: 0.8),
+        borderRadius: BorderRadius.circular(32),
       ),
       child: Row(
         children: [
@@ -174,32 +174,30 @@ class _LangChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(language.flag, style: const TextStyle(fontSize: 20)),
-            const SizedBox(width: 6),
-            Flexible(
-              child: Text(
-                language.nativeName,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontWeight: FontWeight.w600,
-                  fontSize: 14,
-                  color: colors.onSurface,
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(28),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Flexible(
+                child: Text(
+                  language.nativeName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w500,
+                    fontSize: 15,
+                    color: colors.primary,
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(width: 4),
-            Icon(Icons.expand_more_rounded,
-                color: colors.onSurfaceVariant, size: 16),
-          ],
+            ],
+          ),
         ),
       ),
     );

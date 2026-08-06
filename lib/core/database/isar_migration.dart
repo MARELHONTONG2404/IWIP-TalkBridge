@@ -3,8 +3,8 @@ import 'dart:convert';
 import 'package:isar_community/isar.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'collections/favorite_record.dart';
-import 'collections/history_record.dart';
+import 'collections/favorite_record_router.dart';
+import 'collections/history_record_router.dart';
 
 /// Migrasi data lama dari SharedPreferences ke Isar (sekali saja).
 class IsarMigration {

@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -16,35 +15,98 @@ class HomePage extends ConsumerWidget {
     final settings = ref.watch(settingsProvider);
     
     final lang = settings.appLanguage;
-    final translateText = lang == 'Indonesia' ? 'Terjemahkan\ndengan mudah' : (lang == '中文' ? '轻松\n翻译' : 'Translate\nwith ease');
-    final tapToSpeak = lang == 'Indonesia' ? 'Ketuk untuk bicara & terjemahkan' : (lang == '中文' ? '点击此处开始语音翻译' : 'Tap to speak & translate');
+    final translateText = lang == 'Indonesia' ? 'Terjemahkan teks atau suara' : (lang == '中文' ? '翻译文字或语音' : 'Translate text or voice');
     final moreTools = lang == 'Indonesia' ? 'Alat lainnya' : (lang == '中文' ? '更多工具' : 'More tools');
 
     return Scaffold(
-      backgroundColor: theme.scaffoldBackgroundColor,
-      body: SingleChildScrollView(
-        child: Column(
-          children: [
-            _HeroSection(title: translateText),
-            
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+      backgroundColor: theme.colorScheme.surface,
+      body: CustomScrollView(
+        slivers: [
+          // Minimalist AppBar
+          SliverAppBar(
+            pinned: true,
+            floating: true,
+            backgroundColor: theme.colorScheme.surface,
+            surfaceTintColor: theme.colorScheme.surfaceTint,
+            elevation: 0,
+            expandedHeight: 80,
+            flexibleSpace: FlexibleSpaceBar(
+              titlePadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+              title: Row(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Image.asset(
+                      'assets/images/IWIP-Logo-150.png',
+                      height: 28,
+                      errorBuilder: (_, _, _) => Icon(
+                        Icons.business_rounded,
+                        color: theme.colorScheme.primary,
+                        size: 28,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'IWIP TalkBridge',
+                        style: TextStyle(
+                          color: theme.colorScheme.onSurface,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 0.2,
+                        ),
+                      ),
+                      Text(
+                        'Industrial Translator',
+                        style: TextStyle(
+                          color: theme.colorScheme.onSurfaceVariant,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          // Main Content
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Main Translation Card
+                  // Hint Text
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 24),
+                    child: Text(
+                      translateText,
+                      style: TextStyle(
+                        fontSize: 28,
+                        fontWeight: FontWeight.w800,
+                        color: theme.colorScheme.onSurface,
+                        height: 1.2,
+                      ),
+                    ),
+                  ),
+                  
+                  // Input Translation Card
                   Container(
+                    width: double.infinity,
                     decoration: BoxDecoration(
-                      color: theme.cardColor,
+                      color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
                       borderRadius: BorderRadius.circular(24),
-                      border: Border.all(color: theme.dividerColor),
-                      boxShadow: [
-                        BoxShadow(
-                          color: theme.colorScheme.primary.withValues(alpha: 0.12),
-                          blurRadius: 24,
-                          offset: const Offset(0, 8),
-                        ),
-                      ],
+                      border: Border.all(
+                        color: theme.colorScheme.outlineVariant.withValues(alpha: 0.4),
+                      ),
                     ),
                     child: Material(
                       color: Colors.transparent,
@@ -53,52 +115,56 @@ class HomePage extends ConsumerWidget {
                         onTap: () => context.push('/translate'),
                         child: Padding(
                           padding: const EdgeInsets.all(24),
-                          child: Row(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Container(
-                                padding: const EdgeInsets.all(18),
-                                decoration: BoxDecoration(
-                                  color: theme.colorScheme.primary,
-                                  shape: BoxShape.circle,
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: theme.colorScheme.primary.withValues(alpha: 0.3),
-                                      blurRadius: 12,
-                                      offset: const Offset(0, 6),
-                                    ),
-                                  ],
-                                ),
-                                child: const Icon(
-                                  Icons.mic_rounded,
-                                  color: Colors.white,
-                                  size: 36,
+                              Text(
+                                lang == 'Indonesia'
+                                    ? 'Masukkan teks...'
+                                    : (lang == '中文' ? '输入文字...' : 'Enter text...'),
+                                style: TextStyle(
+                                  fontSize: 24,
+                                  fontWeight: FontWeight.w400,
+                                  color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
                                 ),
                               ),
-                              const SizedBox(width: 20),
-                              Expanded(
-                                child: Text(
-                                  tapToSpeak,
-                                  maxLines: 2,
-                                  style: TextStyle(
-                                    fontSize: 18,
-                                    height: 1.3,
-                                    fontWeight: FontWeight.w700,
-                                    color: theme.textTheme.titleLarge?.color,
+                              const SizedBox(height: 48),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Row(
+                                    children: [
+                                      _ActionButton(
+                                        icon: Icons.content_paste_rounded,
+                                        label: lang == 'Indonesia' ? 'Tempel' : 'Paste',
+                                        onTap: () {},
+                                      ),
+                                      const SizedBox(width: 8),
+                                      _ActionButton(
+                                        icon: Icons.camera_alt_rounded,
+                                        label: lang == 'Indonesia' ? 'Kamera' : 'Camera',
+                                        onTap: () => context.push('/camera'),
+                                      ),
+                                    ],
                                   ),
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Container(
-                                padding: const EdgeInsets.all(10),
-                                decoration: BoxDecoration(
-                                  color: theme.scaffoldBackgroundColor,
-                                  shape: BoxShape.circle,
-                                ),
-                                child: Icon(
-                                  Icons.arrow_forward_ios_rounded,
-                                  size: 16,
-                                  color: theme.colorScheme.primary,
-                                ),
+                                  Row(
+                                    children: [
+                                      _ActionButton(
+                                        icon: Icons.backspace_rounded,
+                                        label: lang == 'Indonesia' ? 'Hapus' : 'Clear',
+                                        onTap: () {},
+                                        isSmall: true,
+                                      ),
+                                      const SizedBox(width: 12),
+                                      _ActionButton(
+                                        icon: Icons.mic_rounded,
+                                        label: lang == 'Indonesia' ? 'Suara' : 'Voice',
+                                        isPrimary: true,
+                                        onTap: () => context.push('/translate'),
+                                      ),
+                                    ],
+                                  ),
+                                ],
                               ),
                             ],
                           ),
@@ -106,18 +172,19 @@ class HomePage extends ConsumerWidget {
                       ),
                     ),
                   ),
-                  const SizedBox(height: 36),
+                  
+                  const SizedBox(height: 40),
 
                   Text(
                     moreTools,
                     style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w800,
-                      color: theme.textTheme.titleLarge?.color,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                      color: theme.colorScheme.onSurface,
                       letterSpacing: 0.2,
                     ),
                   ),
-                  const SizedBox(height: 20),
+                  const SizedBox(height: 16),
 
                   GridView.count(
                     crossAxisCount: 2,
@@ -125,7 +192,7 @@ class HomePage extends ConsumerWidget {
                     physics: const NeverScrollableScrollPhysics(),
                     crossAxisSpacing: 16,
                     mainAxisSpacing: 16,
-                    childAspectRatio: 1.3,
+                    childAspectRatio: 1.2,
                     padding: EdgeInsets.zero,
                     children: [
                       _QuickActionCard(
@@ -154,231 +221,9 @@ class HomePage extends ConsumerWidget {
                       ),
                     ],
                   ),
+                  const SizedBox(height: 32),
                 ],
               ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _HeroSection extends StatefulWidget {
-  final String title;
-  
-  const _HeroSection({required this.title});
-
-  @override
-  State<_HeroSection> createState() => _HeroSectionState();
-}
-
-class _HeroSectionState extends State<_HeroSection> with TickerProviderStateMixin {
-  late final AnimationController _globeController;
-  late final AnimationController _floatController;
-  
-  final List<String> _flags = ['🇮🇩', '🇬🇧', '🇨🇳', '🇯🇵', '🇰🇷', '🇸🇦'];
-  int _currentFlagIndex = 0;
-  Timer? _flagTimer;
-
-  @override
-  void initState() {
-    super.initState();
-    _globeController = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 40),
-    )..repeat();
-
-    _floatController = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 3),
-    )..repeat(reverse: true);
-
-    _flagTimer = Timer.periodic(const Duration(seconds: 3), (timer) {
-      if (mounted) {
-        setState(() {
-          _currentFlagIndex = (_currentFlagIndex + 1) % _flags.length;
-        });
-      }
-    });
-  }
-
-  @override
-  void dispose() {
-    _globeController.dispose();
-    _floatController.dispose();
-    _flagTimer?.cancel();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      height: 300,
-      padding: EdgeInsets.only(top: MediaQuery.paddingOf(context).top),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: AppColors.heroGradient,
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: const BorderRadius.only(
-          bottomLeft: Radius.circular(32),
-          bottomRight: Radius.circular(32),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.heroGradient.last.withValues(alpha: 0.3),
-            blurRadius: 30,
-            offset: const Offset(0, 16),
-          ),
-        ],
-      ),
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          Positioned(
-            right: -60,
-            bottom: -30,
-            child: RotationTransition(
-              turns: _globeController,
-              child: Icon(
-                Icons.public,
-                size: 260,
-                color: Colors.white.withValues(alpha: 0.08),
-              ),
-            ),
-          ),
-          
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    Image.asset(
-                      'assets/images/IWIP-Logo-150.png',
-                      height: 32,
-                      errorBuilder: (_, _, _) => const Icon(
-                        Icons.business_rounded,
-                        color: Colors.white,
-                        size: 28,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    const Text(
-                      'IWIP TalkBridge',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 0.5,
-                      ),
-                    ),
-                  ],
-                ),
-                
-                const Spacer(),
-                
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            widget.title,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 32,
-                              fontWeight: FontWeight.w800,
-                              height: 1.2,
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                            decoration: BoxDecoration(
-                              color: Colors.white.withValues(alpha: 0.15),
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(Icons.auto_awesome, color: Colors.white.withValues(alpha: 0.9), size: 14),
-                                const SizedBox(width: 6),
-                                Text(
-                                  'AI-Powered Translation',
-                                  style: TextStyle(
-                                    color: Colors.white.withValues(alpha: 0.95),
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    
-                    AnimatedBuilder(
-                      animation: _floatController,
-                      builder: (context, child) {
-                        return Transform.translate(
-                          offset: Offset(0, 8 * _floatController.value - 4),
-                          child: child,
-                        );
-                      },
-                      child: Container(
-                        width: 72,
-                        height: 72,
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.15),
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                            color: Colors.white.withValues(alpha: 0.25),
-                            width: 1.5,
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.1),
-                              blurRadius: 16,
-                              offset: const Offset(0, 8),
-                            ),
-                          ],
-                        ),
-                        child: Center(
-                          child: AnimatedSwitcher(
-                            duration: const Duration(milliseconds: 600),
-                            transitionBuilder: (child, animation) {
-                              return FadeTransition(
-                                opacity: animation,
-                                child: ScaleTransition(
-                                  scale: animation,
-                                  child: child,
-                                ),
-                              );
-                            },
-                            child: Text(
-                              _flags[_currentFlagIndex],
-                              key: ValueKey<int>(_currentFlagIndex),
-                              style: const TextStyle(fontSize: 38),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 36),
-              ],
             ),
           ),
         ],
@@ -405,47 +250,101 @@ class _QuickActionCard extends StatelessWidget {
     final theme = Theme.of(context);
     return Container(
       decoration: BoxDecoration(
-        color: theme.cardColor,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: theme.dividerColor),
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: theme.colorScheme.outlineVariant.withValues(alpha: 0.5)),
         boxShadow: [
           BoxShadow(
-            color: color.withValues(alpha: 0.08),
-            blurRadius: 16,
-            offset: const Offset(0, 6),
+            color: color.withValues(alpha: 0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
           ),
         ],
       ),
       child: Material(
         color: Colors.transparent,
         child: InkWell(
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: BorderRadius.circular(24),
           onTap: onTap,
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Container(
-                  padding: const EdgeInsets.all(10),
+                  padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
                     color: color.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(14),
+                    borderRadius: BorderRadius.circular(16),
                   ),
-                  child: Icon(icon, size: 28, color: color),
+                  child: Icon(icon, size: 24, color: color),
                 ),
-                const Spacer(),
                 Text(
                   title,
                   style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                    color: theme.textTheme.titleMedium?.color,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: theme.colorScheme.onSurface,
                   ),
                 ),
               ],
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ActionButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  final bool isPrimary;
+  final bool isSmall;
+
+  const _ActionButton({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.isPrimary = false,
+    this.isSmall = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final color = isPrimary ? theme.colorScheme.primary : theme.colorScheme.onSurfaceVariant;
+    final bgColor = isPrimary ? theme.colorScheme.primaryContainer : Colors.transparent;
+
+    return Material(
+      color: bgColor,
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        child: Padding(
+          padding: EdgeInsets.symmetric(
+            horizontal: isSmall ? 8 : 12,
+            vertical: isSmall ? 8 : 10,
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: isSmall ? 20 : 24, color: color),
+              if (!isSmall) ...[
+                const SizedBox(width: 8),
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: color,
+                  ),
+                ),
+              ],
+            ],
           ),
         ),
       ),

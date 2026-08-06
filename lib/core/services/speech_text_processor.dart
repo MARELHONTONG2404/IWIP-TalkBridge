@@ -1,30 +1,7 @@
-import 'package:speech_to_text/speech_recognition_result.dart';
-
 class SpeechTextProcessor {
-  static String pickBestText(SpeechRecognitionResult result) {
-    if (result.alternates.isEmpty) return result.recognizedWords;
-
-    SpeechRecognitionWords best = result.alternates.first;
-    for (final alternate in result.alternates) {
-      if (alternate.hasConfidenceRating && best.hasConfidenceRating) {
-        // Prioritaskan confidence tertinggi (semirip Google).
-        if (alternate.confidence > best.confidence) {
-          best = alternate;
-        } else if ((alternate.confidence - best.confidence).abs() <= 0.02 &&
-            alternate.recognizedWords.length > best.recognizedWords.length) {
-          best = alternate;
-        }
-      } else if (alternate.hasConfidenceRating && !best.hasConfidenceRating) {
-        best = alternate;
-      } else if (!best.hasConfidenceRating &&
-          alternate.recognizedWords.length > best.recognizedWords.length) {
-        best = alternate;
-      }
-    }
-
-    return best.recognizedWords.isNotEmpty
-        ? best.recognizedWords
-        : result.recognizedWords;
+  static String pickBestText(String result) {
+    // Dengan plugin kustom atau Baidu, kembalikan langsung string yang sudah dipilih
+    return result;
   }
 
   static String postProcess(String raw, String languageCode) {

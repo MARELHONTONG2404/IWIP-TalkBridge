@@ -35,17 +35,10 @@ class _BootstrapAppState extends State<BootstrapApp> {
   Future<List<dynamic>> _initialize() async {
     debugPrint('--- AUDIT: _initialize() called');
     final stopwatch = Stopwatch()..start();
+    final prefs = await SharedPreferences.getInstance();
     
-    // Ambil SharedPreferences dan Application Directory secara konkuren
-    final results = await Future.wait([
-      SharedPreferences.getInstance(),
-      getApplicationDocumentsDirectory(),
-    ]);
-    
-    final prefs = results[0] as SharedPreferences;
-    final dir = results[1] as dynamic; // Directory
-    
-    final isar = await IsarService.openWithDir(prefs, dir.path as String);
+    // Skip requesting path_provider on Web
+    final isar = await IsarService.open(prefs);
 
     stopwatch.stop();
     log('[Startup] ILB App initialized in ${stopwatch.elapsedMilliseconds}ms');

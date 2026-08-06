@@ -111,13 +111,13 @@ class CompactHeaderLanguageBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: TranslatePageColors.pillBg,
+      color: TranslatePageColors.cardElevated,
       borderRadius: BorderRadius.circular(24),
       child: InkWell(
         onTap: () => _pickTarget(context),
         borderRadius: BorderRadius.circular(24),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -127,13 +127,13 @@ class CompactHeaderLanguageBar extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                    fontSize: 13,
+                    fontSize: 14,
                     color: TranslatePageColors.textMuted,
                   ),
                 ),
               ),
               const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 6),
+                padding: EdgeInsets.symmetric(horizontal: 8),
                 child: Icon(
                   Icons.arrow_forward_rounded,
                   size: 16,
@@ -146,17 +146,17 @@ class CompactHeaderLanguageBar extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                    fontSize: 13,
+                    fontSize: 14,
                     fontWeight: FontWeight.w600,
-                    color: TranslatePageColors.textPrimary,
+                    color: TranslatePageColors.accentBlue,
                   ),
                 ),
               ),
-              const SizedBox(width: 2),
+              const SizedBox(width: 4),
               const Icon(
                 Icons.expand_more_rounded,
-                size: 18,
-                color: TranslatePageColors.textMuted,
+                size: 20,
+                color: TranslatePageColors.accentBlue,
               ),
             ],
           ),
@@ -265,46 +265,53 @@ class TargetLanguageSelector extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    return Row(
-      children: [
-        Expanded(
-          child: _LangPill(
-            label: 'Auto',
-            value: detectedSource.nativeName,
-            muted: true,
-            colors: colors,
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-          child: Icon(
-            Icons.arrow_forward_rounded,
-            size: 18,
-            color: colors.onSurfaceVariant.withValues(alpha: 0.6),
-          ),
-        ),
-        Expanded(
-          child: _LangPill(
-            label: 'Ke',
-            value: targetLanguage.nativeName,
-            onTap: () => _openPicker(context),
-            colors: colors,
-          ),
-        ),
-        if (onTwoWayChanged != null) ...[
-          const SizedBox(width: 6),
-          IconButton(
-            tooltip: twoWayMode ? 'Mode dua arah aktif' : 'Mode satu arah',
-            visualDensity: VisualDensity.compact,
-            onPressed: () => onTwoWayChanged!(!twoWayMode),
-            icon: Icon(
-              Icons.swap_horiz_rounded,
-              size: 22,
-              color: twoWayMode ? colors.primary : colors.onSurfaceVariant,
+    return Container(
+      decoration: BoxDecoration(
+        color: colors.surfaceContainerHighest.withValues(alpha: 0.3),
+        borderRadius: BorderRadius.circular(32),
+      ),
+      padding: const EdgeInsets.all(4),
+      child: Row(
+        children: [
+          Expanded(
+            child: _LangPill(
+              label: 'Auto',
+              value: detectedSource.nativeName,
+              muted: true,
+              colors: colors,
             ),
           ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Icon(
+              Icons.arrow_forward_rounded,
+              size: 20,
+              color: colors.onSurfaceVariant.withValues(alpha: 0.6),
+            ),
+          ),
+          Expanded(
+            child: _LangPill(
+              label: 'Ke',
+              value: targetLanguage.nativeName,
+              onTap: () => _openPicker(context),
+              colors: colors,
+            ),
+          ),
+          if (onTwoWayChanged != null) ...[
+            const SizedBox(width: 4),
+            IconButton(
+              tooltip: twoWayMode ? 'Mode dua arah aktif' : 'Mode satu arah',
+              visualDensity: VisualDensity.compact,
+              onPressed: () => onTwoWayChanged!(!twoWayMode),
+              icon: Icon(
+                Icons.swap_horiz_rounded,
+                size: 24,
+                color: twoWayMode ? colors.primary : colors.onSurfaceVariant,
+              ),
+            ),
+          ],
         ],
-      ],
+      ),
     );
   }
 }
@@ -327,18 +334,19 @@ class _LangPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final child = Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
         color: muted
-            ? colors.surfaceContainerHighest.withValues(alpha: 0.5)
-            : colors.primaryContainer.withValues(alpha: 0.35),
-        borderRadius: BorderRadius.circular(14),
+            ? Colors.transparent
+            : colors.primaryContainer.withValues(alpha: 0.4),
+        borderRadius: BorderRadius.circular(28),
       ),
       child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Expanded(
+          Flexible(
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 Text(
                   label,
@@ -355,7 +363,7 @@ class _LangPill extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    fontSize: 14,
+                    fontSize: 15,
                     fontWeight: FontWeight.w600,
                     color: colors.onSurface,
                   ),
@@ -363,8 +371,10 @@ class _LangPill extends StatelessWidget {
               ],
             ),
           ),
-          if (onTap != null)
-            Icon(Icons.expand_more_rounded, size: 18, color: colors.onSurfaceVariant),
+          if (onTap != null) ...[
+            const SizedBox(width: 4),
+            Icon(Icons.expand_more_rounded, size: 20, color: colors.onSurfaceVariant),
+          ],
         ],
       ),
     );
@@ -374,7 +384,7 @@ class _LangPill extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(28),
         child: child,
       ),
     );
@@ -485,40 +495,44 @@ class LanguageSelector extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    return Row(
-      children: [
-        Expanded(
-          child: _LanguageChip(
-            language: sourceLanguage,
-            onTap: () => _openPicker(
-              context,
-              selected: sourceLanguage,
-              onSelected: onSourceChanged,
+    return Container(
+      decoration: BoxDecoration(
+        color: colors.surfaceContainerHighest.withValues(alpha: 0.3),
+        borderRadius: BorderRadius.circular(32),
+      ),
+      padding: const EdgeInsets.all(4),
+      child: Row(
+        children: [
+          Expanded(
+            child: _LanguageChip(
+              language: sourceLanguage,
+              onTap: () => _openPicker(
+                context,
+                selected: sourceLanguage,
+                onSelected: onSourceChanged,
+              ),
             ),
           ),
-        ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14),
-          child: IconButton(
+          IconButton(
             onPressed: onSwap,
             icon: Icon(
-              Icons.arrow_forward_rounded,
+              Icons.swap_horiz_rounded,
               color: colors.onSurfaceVariant,
-              size: 34,
+              size: 26,
             ),
           ),
-        ),
-        Expanded(
-          child: _LanguageChip(
-            language: targetLanguage,
-            onTap: () => _openPicker(
-              context,
-              selected: targetLanguage,
-              onSelected: onTargetChanged,
+          Expanded(
+            child: _LanguageChip(
+              language: targetLanguage,
+              onTap: () => _openPicker(
+                context,
+                selected: targetLanguage,
+                onSelected: onTargetChanged,
+              ),
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
@@ -533,13 +547,12 @@ class _LanguageChip extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     return Material(
-      color: colors.surface,
-      borderRadius: BorderRadius.circular(22),
+      color: Colors.transparent,
       child: InkWell(
-        borderRadius: BorderRadius.circular(22),
+        borderRadius: BorderRadius.circular(28),
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 18),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
@@ -550,17 +563,11 @@ class _LanguageChip extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    fontWeight: FontWeight.w600,
-                    fontSize: 17,
-                    color: colors.onSurface,
+                    fontWeight: FontWeight.w500,
+                    fontSize: 16,
+                    color: colors.primary,
                   ),
                 ),
-              ),
-              const SizedBox(width: 6),
-              Icon(
-                Icons.expand_more_rounded,
-                color: colors.onSurfaceVariant,
-                size: 20,
               ),
             ],
           ),

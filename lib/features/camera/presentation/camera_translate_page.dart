@@ -8,7 +8,7 @@ import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart
 import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 
-import '../../../../core/services/cloud_vision_ocr_service.dart';
+import '../../../../core/services/baidu_ocr_service.dart';
 import '../../../../core/services/translation_service.dart';
 import '../../../../core/services/tts_service.dart';
 import '../../favorite/providers/favorite_provider.dart';
@@ -21,8 +21,8 @@ import 'widgets/language_selector_camera.dart';
 
 const String _kOcrFailMessage = 'Teks tidak dapat dikenali.\nSilakan arahkan kamera lebih dekat.';
 const String _kChineseFallbackMessage = 'Tulisan Mandarin belum terbaca.\nCoba foto lebih dekat dan jelas.';
-const String _kVisionNoKeyMessage = 'OCR Mandarin butuh Google API key (Cloud Vision).\nJalankan app dengan:\n--dart-define=GOOGLE_TRANSLATE_API_KEY=YOUR_KEY\nAtau ketik/tempel teks di menu Translate.';
-const String _kVisionDisabledMessage = 'Cloud Vision API belum aktif untuk API key ini.\nAktifkan Vision API di Google Cloud, lalu coba lagi.';
+const String _kBaiduNoKeyMessage = 'OCR Mandarin butuh Baidu API key.\nJalankan app dengan:\n--dart-define=BAIDU_OCR_API_KEY=YOUR_KEY\n--dart-define=BAIDU_OCR_SECRET_KEY=YOUR_SECRET';
+const String _kBaiduDisabledMessage = 'Baidu API limit/disabled.\nCek kuota Baidu API Anda.';
 
 class CameraTranslatePage extends ConsumerStatefulWidget {
   const CameraTranslatePage({super.key});
@@ -46,14 +46,14 @@ class _CameraTranslatePageState extends ConsumerState<CameraTranslatePage> {
   LanguageModel _targetLang = languageByCode('zh');
 
   // --- Services ---
-  TextRecognizer? _latinRecognizer;
+  TextRecognizer? _textRecognizer;
   final _translationService = TranslationService();
   final _ttsService = TtsService();
   final _picker = ImagePicker();
-  final _cloudOcr = CloudVisionOcrService();
+  final _baiduOcr = BaiduOcrService();
 
   // --- Optimization Caches ---
-  CloudVisionOcrFailure _lastCloudFailure = CloudVisionOcrFailure.none;
+  BaiduOcrFailure _lastBaiduFailure = BaiduOcrFailure.none;
   String _lastOcrHash = '';
   Timer? _instantModeTimer;
   double _minAvailableZoom = 1.0;
@@ -116,7 +116,7 @@ class _CameraTranslatePageState extends ConsumerState<CameraTranslatePage> {
   void dispose() {
     _stopInstantTimer();
     _cameraController?.dispose();
-    _latinRecognizer?.close();
+    _textRecognizer?.close();
     _isCameraInitialized.dispose();
     _isFlashOn.dispose();
     _currentModeIndex.dispose();
@@ -143,9 +143,9 @@ class _CameraTranslatePageState extends ConsumerState<CameraTranslatePage> {
   }
 
   // --- OCR Pipeline: Text Cleaning & Validation ---
-  Future<void> _closeLatinRecognizer() async {
-    final prev = _latinRecognizer;
-    _latinRecognizer = null;
+  Future<void> _closeTextRecognizer() async {
+    final prev = _textRecognizer;
+    _textRecognizer = null;
     if (prev != null) {
       try {
         await prev.close();
@@ -164,46 +164,20 @@ class _CameraTranslatePageState extends ConsumerState<CameraTranslatePage> {
 
   String _cleanOcrText(String raw) {
     var text = raw.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
+    // Remove unprintable characters except newlines
     text = text.replaceAll(RegExp(r'[\x00-\x08\x0B\x0C\x0E-\x1F]'), '');
+    // Replace multiple spaces (excluding newlines) with a single space
     text = text.replaceAll(RegExp(r'[^\S\n]+'), ' ');
 
     final lines = text
         .split('\n')
         .map((line) => line.trim())
         .where((line) => line.isNotEmpty)
-        .where((line) {
-          final meaningful = RegExp(
-            r'[A-Za-z0-9\u00C0-\u024F\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]',
-          ).allMatches(line).length;
-          return meaningful >= 1; // At least one meaningful char per line
-        })
         .toList();
 
     if (lines.isEmpty) return '';
-
-    final buffer = StringBuffer();
-    for (int i = 0; i < lines.length; i++) {
-      final line = lines[i];
-      buffer.write(line);
-      
-      if (i < lines.length - 1) {
-        final lastChar = line.substring(line.length - 1);
-        final isSentenceEnd = RegExp(r'[.!?;:。！？：]').hasMatch(lastChar);
-        
-        if (isSentenceEnd) {
-          buffer.write('\n');
-        } else {
-          // Heuristic: if current line or next line has CJK, don't add space between them
-          final hasCjk = RegExp(r'[\u4e00-\u9fff]').hasMatch(line) || 
-                         RegExp(r'[\u4e00-\u9fff]').hasMatch(lines[i+1]);
-          if (!hasCjk) {
-            buffer.write(' ');
-          }
-        }
-      }
-    }
-
-    return buffer.toString().trim();
+    
+    return lines.join('\n');
   }
 
   // Heuristic OCR Confidence Validation
@@ -240,43 +214,43 @@ class _CameraTranslatePageState extends ConsumerState<CameraTranslatePage> {
     return linesOut.join('\n');
   }
 
-  Future<String> _ocrLatin(String path) async {
-    await _closeLatinRecognizer();
+  Future<String> _ocrWithScript(String path, TextRecognitionScript script) async {
+    await _closeTextRecognizer();
     await Future<void>.delayed(const Duration(milliseconds: 100));
 
-    final recognizer = TextRecognizer(script: TextRecognitionScript.latin);
-    _latinRecognizer = recognizer;
+    final recognizer = TextRecognizer(script: script);
+    _textRecognizer = recognizer;
     try {
       // InputImage.fromFilePath handles EXIF orientation automatically
       final recognized = await recognizer.processImage(InputImage.fromFilePath(path));
       return _cleanOcrText(_extractOcrText(recognized));
     } finally {
-      await _closeLatinRecognizer();
+      await _closeTextRecognizer();
     }
   }
 
-  String _messageForCloudFailure(CloudVisionOcrFailure failure) {
+  String _messageForBaiduFailure(BaiduOcrFailure failure) {
     return switch (failure) {
-      CloudVisionOcrFailure.noApiKey => _kVisionNoKeyMessage,
-      CloudVisionOcrFailure.apiDisabled => _kVisionDisabledMessage,
-      CloudVisionOcrFailure.imageTooLarge => 'Foto terlalu besar. Ambil ulang lebih dekat.',
-      CloudVisionOcrFailure.network => 'Gagal koneksi. Cek internet, lalu coba lagi.',
+      BaiduOcrFailure.noApiKey => _kBaiduNoKeyMessage,
+      BaiduOcrFailure.apiDisabled => _kBaiduDisabledMessage,
+      BaiduOcrFailure.imageTooLarge => 'Foto terlalu besar. Ambil ulang lebih dekat.',
+      BaiduOcrFailure.network => 'Gagal koneksi. Cek internet, lalu coba lagi.',
       _ => _kChineseFallbackMessage,
     };
   }
 
-  Future<String?> _ocrCloudVision(String path) async {
-    final result = await _cloudOcr.recognizeFile(
+  Future<String?> _ocrBaidu(String path) async {
+    final result = await _baiduOcr.recognizeFile(
       path,
       clean: _cleanOcrText,
       isValid: _isValidOcrText,
     );
-    _lastCloudFailure = result.failure;
+    _lastBaiduFailure = result.failure;
     return result.isOk ? result.text : null;
   }
 
   Future<String> _runOcrOnFile(String path) async {
-    _lastCloudFailure = CloudVisionOcrFailure.none;
+    _lastBaiduFailure = BaiduOcrFailure.none;
 
     // Apply image enhancement before OCR
     final enhancedFile = await ImageEnhancementService.enhanceImage(File(path));
@@ -285,18 +259,29 @@ class _CameraTranslatePageState extends ConsumerState<CameraTranslatePage> {
     final needsCjk = _sourceLang.code == 'zh' || _sourceLang.code == 'ja' || _sourceLang.code == 'ko';
 
     if (needsCjk) {
-      final cloud = await _ocrCloudVision(enhancedPath);
-      return cloud ?? '';
+      if (_sourceLang.code == 'zh') {
+        final baidu = await _ocrBaidu(enhancedPath);
+        if (baidu != null && baidu.isNotEmpty) return baidu;
+        // Fallback to ML Kit Chinese
+        return await _ocrWithScript(enhancedPath, TextRecognitionScript.chinese);
+      } else {
+        final script = _sourceLang.code == 'ja' ? TextRecognitionScript.japanese : 
+                       _sourceLang.code == 'ko' ? TextRecognitionScript.korean : 
+                       TextRecognitionScript.chinese;
+        return await _ocrWithScript(enhancedPath, script);
+      }
     }
 
     if (_sourceLang.code == 'auto') {
-      final latin = await _ocrLatin(enhancedPath);
+      final latin = await _ocrWithScript(enhancedPath, TextRecognitionScript.latin);
       if (_isValidOcrText(latin)) return latin;
 
-      final cloud = await _ocrCloudVision(enhancedPath);
-      return cloud ?? '';
+      final baidu = await _ocrBaidu(enhancedPath);
+      if (baidu != null && baidu.isNotEmpty) return baidu;
+      
+      return await _ocrWithScript(enhancedPath, TextRecognitionScript.chinese);
     }
-    return _ocrLatin(enhancedPath);
+    return _ocrWithScript(enhancedPath, TextRecognitionScript.latin);
   }
 
 
@@ -360,8 +345,8 @@ class _CameraTranslatePageState extends ConsumerState<CameraTranslatePage> {
       if (!_isValidOcrText(cleaned)) {
         if (!isInstant) {
           final needsCjk = _sourceLang.code == 'zh' || _sourceLang.code == 'ja' || _sourceLang.code == 'ko' || _sourceLang.code == 'auto';
-          final msg = needsCjk && _lastCloudFailure != CloudVisionOcrFailure.none
-                ? _messageForCloudFailure(_lastCloudFailure)
+          final msg = needsCjk && _lastBaiduFailure != BaiduOcrFailure.none
+                ? _messageForBaiduFailure(_lastBaiduFailure)
                 : _kOcrFailMessage; // Silakan arahkan kamera lebih dekat.
                 
           _showErrorSnackBar(msg);
@@ -391,7 +376,7 @@ class _CameraTranslatePageState extends ConsumerState<CameraTranslatePage> {
       }
     } finally {
       _busy.value = false;
-      await _closeLatinRecognizer();
+      await _closeTextRecognizer();
     }
   }
 
@@ -874,17 +859,62 @@ class _CameraTranslatePageState extends ConsumerState<CameraTranslatePage> {
                     decoration: BoxDecoration(color: colors.outlineVariant, borderRadius: BorderRadius.circular(2)),
                   ),
                 ),
-                Text(
-                  recognized,
-                  style: TextStyle(fontSize: 20, color: colors.onSurfaceVariant, height: 1.4),
+                
+                // OCR Result Label
+                Row(
+                  children: [
+                    Icon(Icons.image_search, size: 16, color: colors.primary),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Hasil OCR:',
+                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: colors.primary),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 16),
-                Divider(color: colors.outlineVariant),
-                const SizedBox(height: 16),
-                Text(
-                  translated,
-                  style: TextStyle(fontSize: 24, color: colors.onSurface, fontWeight: FontWeight.w500, height: 1.3),
+                const SizedBox(height: 8),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16.0),
+                  decoration: BoxDecoration(
+                    color: colors.surfaceContainerHighest.withValues(alpha: 0.3),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: SelectableText(
+                    recognized,
+                    style: TextStyle(fontSize: 16, color: colors.onSurfaceVariant, height: 1.5),
+                    textAlign: TextAlign.left,
+                  ),
                 ),
+                
+                const SizedBox(height: 24),
+                
+                // Translation Result Label
+                Row(
+                  children: [
+                    Icon(Icons.translate, size: 16, color: colors.primary),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Terjemahan:',
+                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: colors.primary),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16.0),
+                  decoration: BoxDecoration(
+                    color: colors.surfaceContainerHighest.withValues(alpha: 0.5),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: colors.outlineVariant.withValues(alpha: 0.5)),
+                  ),
+                  child: SelectableText(
+                    translated,
+                    style: TextStyle(fontSize: 18, color: colors.onSurface, fontWeight: FontWeight.w500, height: 1.5),
+                    textAlign: TextAlign.left,
+                  ),
+                ),
+                
                 const SizedBox(height: 32),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,

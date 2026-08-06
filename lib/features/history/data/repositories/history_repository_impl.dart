@@ -2,7 +2,7 @@ import 'package:isar_community/isar.dart';
 
 import '../../domain/entities/history_item.dart';
 import '../../domain/repositories/history_repository.dart';
-import '../../../../core/database/collections/history_record.dart';
+import '../../../../core/database/collections/history_record_router.dart';
 
 class HistoryRepositoryImpl implements HistoryRepository {
   final Isar _isar;

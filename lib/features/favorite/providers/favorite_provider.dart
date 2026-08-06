@@ -3,7 +3,7 @@ import 'package:isar_community/isar.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/data/iwip_hse_phrases.dart';
-import '../../../core/database/collections/favorite_record.dart';
+import '../../../core/database/collections/favorite_record_router.dart';
 import '../../../core/database/isar_provider.dart';
 import '../../settings/providers/settings_provider.dart';
 

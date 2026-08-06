@@ -3,8 +3,8 @@ import 'package:isar_community/isar.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'collections/favorite_record.dart';
-import 'collections/history_record.dart';
+import 'collections/favorite_record_router.dart';
+import 'collections/history_record_router.dart';
 import 'isar_migration.dart';
 
 class _DummyIsar implements Isar {

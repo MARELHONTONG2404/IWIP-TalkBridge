@@ -140,8 +140,7 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
         if (message.contains('Mencoba mode lain')) return;
 
         // Mic masih aktif = engine sedang recovery, jangan ganggu sesi.
-        if (_manualSessionActive &&
-            (_speechService.isListening || _speechService.isRetryingLocale)) {
+        if (_manualSessionActive && _speechService.isListening) {
           _log('[Speech Recognition] recoverable: $message');
           return;
         }
@@ -345,15 +344,13 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
 
     final started = await _speechService.startListening(
       localeId: _isInterpreterMode
-          ? (_session!.languageA.speechCode) // akan di-override oleh chain
+          ? (_session!.languageA.speechCode) 
           : 'id-ID',
-      languageCode: 'auto',
+      languageCode: ref.read(conversationProvider).targetLanguage.code, // Jangan gunakan 'auto', gunakan bahasa target yg sedang dipilih!
       onResult: _onSpeechResult,
       onSoundLevel: _onSoundLevel,
-      autoDetectLanguage: true,
+      autoDetectLanguage: false,
       manualControl: true,
-      // Jika mode interpreter, berikan kode bahasa sesi agar STT
-      // memprioritaskan locale yang relevan untuk dua bahasa ini.
       sessionLanguageCodes:
           _isInterpreterMode ? _session!.sessionLanguageCodes : null,
     );
